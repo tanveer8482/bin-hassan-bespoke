@@ -23,4 +23,8 @@ module.exports = {
   ensureMethod,
   isAdmin,
   sendOk
+<<<<<<< HEAD
 };
+=======
+};
+>>>>>>> 4e59f8e (Vite configuration fixed for Vercel)

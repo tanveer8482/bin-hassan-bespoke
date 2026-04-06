@@ -179,4 +179,8 @@ export function ShopApp({ user, data }) {
       )}
     </div>
   );
+<<<<<<< HEAD
 }
+=======
+}
+>>>>>>> 4e59f8e (Vite configuration fixed for Vercel)

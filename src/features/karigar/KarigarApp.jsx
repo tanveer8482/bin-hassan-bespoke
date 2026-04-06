@@ -222,6 +222,12 @@ export function KarigarApp({ user, data, onCompletePiece, busyAction }) {
       )}
     </div>
   );
+<<<<<<< HEAD
 }
 
 
+=======
+}
+
+
+>>>>>>> 4e59f8e (Vite configuration fixed for Vercel)

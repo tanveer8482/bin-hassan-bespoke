@@ -423,8 +423,13 @@ function filterSnapshotByRole(user, snapshot) {
       dashboard: buildDashboard([], [])
     }
   };
+<<<<<<< HEAD
 }
 
+=======
+}
+
+>>>>>>> 4e59f8e (Vite configuration fixed for Vercel)
 async function loadFullSnapshot() {
   const [
     users,
@@ -510,6 +515,12 @@ module.exports = {
   resolveKarigarPieceRate,
   resolveShopItemRate,
   withComputedFields
+<<<<<<< HEAD
 };
 
 
+=======
+};
+
+
+>>>>>>> 4e59f8e (Vite configuration fixed for Vercel)

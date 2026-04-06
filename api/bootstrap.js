@@ -84,4 +84,8 @@ module.exports = withErrorHandler(async (req, res) => {
   sendOk(res, {
     message: "Default settings ensured"
   });
+<<<<<<< HEAD
 });
+=======
+});
+>>>>>>> 4e59f8e (Vite configuration fixed for Vercel)

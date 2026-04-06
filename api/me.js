@@ -10,4 +10,8 @@ module.exports = withErrorHandler(async (req, res) => {
     user,
     last_synced: new Date().toISOString()
   });
+<<<<<<< HEAD
 });
+=======
+});
+>>>>>>> 4e59f8e (Vite configuration fixed for Vercel)

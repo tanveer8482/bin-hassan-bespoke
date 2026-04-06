@@ -123,4 +123,8 @@ module.exports = withErrorHandler(async (req, res) => {
     message: "Karigar rates saved",
     ...result
   });
+<<<<<<< HEAD
 });
+=======
+});
+>>>>>>> 4e59f8e (Vite configuration fixed for Vercel)

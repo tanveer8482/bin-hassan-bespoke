@@ -114,4 +114,8 @@ module.exports = {
   ROLES,
   SHEETS,
   STATUS
+<<<<<<< HEAD
 };
+=======
+};
+>>>>>>> 4e59f8e (Vite configuration fixed for Vercel)

@@ -99,4 +99,8 @@ module.exports = withErrorHandler(async (req, res) => {
         : "Piece completed with verification",
     piece: stripMeta(updated)
   });
+<<<<<<< HEAD
 });
+=======
+});
+>>>>>>> 4e59f8e (Vite configuration fixed for Vercel)

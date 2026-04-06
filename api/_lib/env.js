@@ -36,4 +36,8 @@ function getEnv() {
   return cache;
 }
 
+<<<<<<< HEAD
 module.exports = { getEnv };
+=======
+module.exports = { getEnv };
+>>>>>>> 4e59f8e (Vite configuration fixed for Vercel)

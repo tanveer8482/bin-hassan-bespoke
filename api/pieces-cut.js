@@ -81,4 +81,8 @@ module.exports = withErrorHandler(async (req, res) => {
       : "Cutting verified successfully",
     piece: stripMeta(updated)
   });
+<<<<<<< HEAD
 });
+=======
+});
+>>>>>>> 4e59f8e (Vite configuration fixed for Vercel)

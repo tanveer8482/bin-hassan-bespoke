@@ -9,4 +9,8 @@
   <path d="M123 153h266l-36 211H159z" fill="#d9b166"/>
   <path d="M256 126l28 52h-56zM210 249h92v111h-92z" fill="#12161c"/>
   <text x="256" y="434" fill="#f0ede6" font-family="Georgia, serif" font-size="48" text-anchor="middle">BHB</text>
+<<<<<<< HEAD
 </svg>
+=======
+</svg>
+>>>>>>> 4e59f8e (Vite configuration fixed for Vercel)

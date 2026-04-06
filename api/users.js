@@ -178,5 +178,10 @@ module.exports = withErrorHandler(async (req, res) => {
     message: "User deleted",
     username: target.username
   });
+<<<<<<< HEAD
 });
 
+=======
+});
+
+>>>>>>> 4e59f8e (Vite configuration fixed for Vercel)

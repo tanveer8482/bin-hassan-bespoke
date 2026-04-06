@@ -60,4 +60,8 @@ module.exports = withErrorHandler(async (req, res) => {
     message: "Karigar payment recorded",
     payment: record
   });
+<<<<<<< HEAD
 });
+=======
+});
+>>>>>>> 4e59f8e (Vite configuration fixed for Vercel)

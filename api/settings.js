@@ -83,4 +83,8 @@ module.exports = withErrorHandler(async (req, res) => {
     message: "Settings saved",
     changes
   });
+<<<<<<< HEAD
 });
+=======
+});
+>>>>>>> 4e59f8e (Vite configuration fixed for Vercel)

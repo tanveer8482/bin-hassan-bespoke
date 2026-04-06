@@ -1,11 +1,19 @@
+<<<<<<< HEAD
 
+=======
+
+>>>>>>> 4e59f8e (Vite configuration fixed for Vercel)
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "./lib/api";
 import { emptySnapshot } from "./lib/emptySnapshot";
 import { SyncBar } from "./components/SyncBar";
 import { AdminApp } from "./features/admin/AdminApp";
 import { KarigarApp } from "./features/karigar/KarigarApp";
+<<<<<<< HEAD
 import { ShopApp } from "./features/shop/ShopApp";
+=======
+import { ShopApp } from "./features/shop/ShopApp";
+>>>>>>> 4e59f8e (Vite configuration fixed for Vercel)
 import { CuttingApp } from "./features/cutting/CuttingApp";
 
 const STORAGE_TOKEN = "bhb_token";
@@ -288,7 +296,11 @@ export default function App() {
         runAction("saveSettings", () => api.saveSettings(token, payload), "Setting saved"),
       refresh: () => refreshSnapshot(token)
     };
+<<<<<<< HEAD
   }, [token, runAction, refreshSnapshot]);
+=======
+  }, [token, runAction, refreshSnapshot]);
+>>>>>>> 4e59f8e (Vite configuration fixed for Vercel)
 
   const handleLogin = async (credentials) => {
     setLoading(true);
@@ -355,6 +367,7 @@ export default function App() {
         />
       ) : null}
 
+<<<<<<< HEAD
       {!loading && user?.role === "shop" ? <ShopApp user={user} data={data} /> : null}
       {!loading && user?.role === "cutting" ? (
         <CuttingApp
@@ -370,3 +383,20 @@ export default function App() {
 
 
 
+=======
+      {!loading && user?.role === "shop" ? <ShopApp user={user} data={data} /> : null}
+      {!loading && user?.role === "cutting" ? (
+        <CuttingApp
+          data={data}
+          onUploadCuttingPhoto={(payload) => actions.markPieceCut(payload)}
+          busyAction={busyAction}
+        />
+      ) : null}
+
+    </div>
+  );
+}
+
+
+
+>>>>>>> 4e59f8e (Vite configuration fixed for Vercel)

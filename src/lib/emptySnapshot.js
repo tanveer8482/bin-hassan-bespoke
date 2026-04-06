@@ -26,4 +26,8 @@ export function emptySnapshot() {
     karigarRates: [],
     computed: EMPTY_COMPUTED
   };
+<<<<<<< HEAD
 }
+=======
+}
+>>>>>>> 4e59f8e (Vite configuration fixed for Vercel)

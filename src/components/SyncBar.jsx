@@ -9,4 +9,8 @@ export function SyncBar({ lastSynced, offline }) {
       {offline ? <span className="offline-pill">Offline mode</span> : null}
     </div>
   );
+<<<<<<< HEAD
 }
+=======
+}
+>>>>>>> 4e59f8e (Vite configuration fixed for Vercel)

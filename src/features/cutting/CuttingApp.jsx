@@ -101,4 +101,8 @@ export function CuttingApp({ data, onUploadCuttingPhoto, busyAction }) {
       </section>
     </div>
   );
+<<<<<<< HEAD
 }
+=======
+}
+>>>>>>> 4e59f8e (Vite configuration fixed for Vercel)

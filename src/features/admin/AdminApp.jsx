@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 
+=======
+
+>>>>>>> 4e59f8e (Vite configuration fixed for Vercel)
 import { useMemo, useState } from "react";
 import { StatusBadge } from "../../components/StatusBadge";
 import {
@@ -125,7 +129,11 @@ export function AdminApp({ data, actions, busyAction }) {
     entity_id: ""
   });
 
+<<<<<<< HEAD
   const [settingForm, setSettingForm] = useState({ key: "", value: "", description: "" });
+=======
+  const [settingForm, setSettingForm] = useState({ key: "", value: "", description: "" });
+>>>>>>> 4e59f8e (Vite configuration fixed for Vercel)
   const [trackOrderId, setTrackOrderId] = useState("");
 
   const shopsById = useMemo(() => byId(data.shops, "shop_id"), [data.shops]);
@@ -300,6 +308,7 @@ export function AdminApp({ data, actions, busyAction }) {
   };
 
 
+<<<<<<< HEAD
   const selectSlipPhoto = async (file) => {
     if (!file) return;
 
@@ -332,6 +341,40 @@ export function AdminApp({ data, actions, busyAction }) {
       // Ignore local read errors; app-level error toast handles API issues.
     }
   };
+=======
+  const selectSlipPhoto = async (file) => {
+    if (!file) return;
+
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      setOrderForm((current) => ({
+        ...current,
+        slip_photo_data_url: dataUrl,
+        slip_photo_name: file.name || "slip-photo.jpg"
+      }));
+    } catch {
+      setOrderForm((current) => ({
+        ...current,
+        slip_photo_data_url: "",
+        slip_photo_name: ""
+      }));
+    }
+  };
+
+  const uploadCuttingPhoto = async (pieceId, file) => {
+    if (!file) return;
+
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      await actions.markPieceCut({
+        piece_id: pieceId,
+        photo_data_url: dataUrl
+      });
+    } catch {
+      // Ignore local read errors; app-level error toast handles API issues.
+    }
+  };
+>>>>>>> 4e59f8e (Vite configuration fixed for Vercel)
   const markDelivered = async (orderId) => {
     await actions.updateOrder({
       order_id: orderId,
@@ -368,7 +411,11 @@ export function AdminApp({ data, actions, busyAction }) {
         items: current.items.filter((_, itemIndex) => itemIndex !== index)
       };
     });
+<<<<<<< HEAD
   };
+=======
+  };
+>>>>>>> 4e59f8e (Vite configuration fixed for Vercel)
 
   const assignPiece = async (pieceId) => {
     const draft = assignDraft[pieceId] || {};
@@ -799,7 +846,11 @@ export function AdminApp({ data, actions, busyAction }) {
             <button className="button" type="submit" disabled={busyAction === "createOrder"}>
               {busyAction === "createOrder" ? "Saving..." : "Save Order"}
             </button>
+<<<<<<< HEAD
           </form>
+=======
+          </form>
+>>>>>>> 4e59f8e (Vite configuration fixed for Vercel)
 
           <div className="panel inset">
             <div className="panel-head">
@@ -934,6 +985,7 @@ export function AdminApp({ data, actions, busyAction }) {
                   <p className="muted">
                     Shop: {shopsById[order?.shop_id]?.shop_name || order?.shop_id || "-"}
                   </p>
+<<<<<<< HEAD
                   {piece.reference_slip_url ? (
                     <a className="link" href={piece.reference_slip_url} target="_blank" rel="noreferrer">
                       <img src={piece.reference_slip_url} alt="Reference slip" className="slip-thumb" />
@@ -950,6 +1002,24 @@ export function AdminApp({ data, actions, busyAction }) {
                     <span>
                       {busyAction === `cut:${piece.piece_id}` ? "Uploading..." : "Upload Cutting Photo"}
                     </span>
+=======
+                  {piece.reference_slip_url ? (
+                    <a className="link" href={piece.reference_slip_url} target="_blank" rel="noreferrer">
+                      <img src={piece.reference_slip_url} alt="Reference slip" className="slip-thumb" />
+                    </a>
+                  ) : null}
+                  <label className="file-upload">
+                    <input
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      onChange={(event) => uploadCuttingPhoto(piece.piece_id, event.target.files?.[0])}
+                      disabled={busyAction === `cut:${piece.piece_id}`}
+                    />
+                    <span>
+                      {busyAction === `cut:${piece.piece_id}` ? "Uploading..." : "Upload Cutting Photo"}
+                    </span>
+>>>>>>> 4e59f8e (Vite configuration fixed for Vercel)
                   </label>
                 </article>
               );
@@ -1294,7 +1364,11 @@ export function AdminApp({ data, actions, busyAction }) {
               <button className="button" type="submit">
                 Save Karigar
               </button>
+<<<<<<< HEAD
             </form>
+=======
+            </form>
+>>>>>>> 4e59f8e (Vite configuration fixed for Vercel)
 
             <form className="panel inset" onSubmit={submitKarigarUpdate}>
               <h3>Edit Karigar</h3>
@@ -1686,7 +1760,11 @@ export function AdminApp({ data, actions, busyAction }) {
             </div>
           </div>
         </section>
+<<<<<<< HEAD
       ) : null}
+=======
+      ) : null}
+>>>>>>> 4e59f8e (Vite configuration fixed for Vercel)
 
 
       {tab === "track" ? (
@@ -1753,7 +1831,11 @@ export function AdminApp({ data, actions, busyAction }) {
                   <p>
                     <strong>{order.order_number}</strong> - {shopsById[order.shop_id]?.shop_name || order.shop_id}
                   </p>
+<<<<<<< HEAD
                   <p className="muted">Delivery: {formatDate(order.delivery_date)}</p>
+=======
+                  <p className="muted">Delivery: {formatDate(order.delivery_date)}</p>
+>>>>>>> 4e59f8e (Vite configuration fixed for Vercel)
                   <StatusBadge label="Due Tomorrow" tone="in-progress" />
                 </div>
               ))}
@@ -1865,7 +1947,11 @@ export function AdminApp({ data, actions, busyAction }) {
             )}
           </div>
         </section>
+<<<<<<< HEAD
       ) : null}
+=======
+      ) : null}
+>>>>>>> 4e59f8e (Vite configuration fixed for Vercel)
       {tab === "settings" ? (
         <section className="panel">
           <h2>Settings & Users</h2>
@@ -1916,7 +2002,11 @@ export function AdminApp({ data, actions, busyAction }) {
                 >
                   <option value="admin">Admin</option>
                   <option value="karigar">Karigar</option>
+<<<<<<< HEAD
                   <option value="shop">Shop</option>
+=======
+                  <option value="shop">Shop</option>
+>>>>>>> 4e59f8e (Vite configuration fixed for Vercel)
                   <option value="cutting">Cutting Worker</option>
                 </select>
               </label>
@@ -2018,7 +2108,11 @@ export function AdminApp({ data, actions, busyAction }) {
                   <option value="">No change</option>
                   <option value="admin">Admin</option>
                   <option value="karigar">Karigar</option>
+<<<<<<< HEAD
                   <option value="shop">Shop</option>
+=======
+                  <option value="shop">Shop</option>
+>>>>>>> 4e59f8e (Vite configuration fixed for Vercel)
                   <option value="cutting">Cutting Worker</option>
                 </select>
               </label>
@@ -2162,6 +2256,7 @@ export function AdminApp({ data, actions, busyAction }) {
       ) : null}
     </div>
   );
+<<<<<<< HEAD
 }
 
 
@@ -2192,3 +2287,35 @@ export function AdminApp({ data, actions, busyAction }) {
 
 
 
+=======
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+>>>>>>> 4e59f8e (Vite configuration fixed for Vercel)

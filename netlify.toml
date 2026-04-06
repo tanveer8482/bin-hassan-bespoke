@@ -13,4 +13,8 @@
 [[redirects]]
   from = "/*"
   to = "/index.html"
+<<<<<<< HEAD
   status = 200
+=======
+  status = 200
+>>>>>>> 4e59f8e (Vite configuration fixed for Vercel)

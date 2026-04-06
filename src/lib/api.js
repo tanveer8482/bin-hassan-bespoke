@@ -76,4 +76,8 @@ export const api = {
 
   listSettings: (token) => request("/settings", { token }),
   saveSettings: (token, body) => request("/settings", { method: "POST", token, body })
+<<<<<<< HEAD
 };
+=======
+};
+>>>>>>> 4e59f8e (Vite configuration fixed for Vercel)
