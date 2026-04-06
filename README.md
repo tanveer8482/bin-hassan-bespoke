@@ -1,4 +1,4 @@
-# Bin Hassan Bespoke
+﻿# Bin Hassan Bespoke
 
 Bin Hassan Bespoke is a full-stack tailor workshop system with:
 - React PWA frontend
@@ -103,8 +103,4 @@ If `Users` tab is empty:
 Use root deployment with `vercel.json`.
 
 ### Netlify
-<<<<<<< HEAD
 `netlify.toml` is set with functions directory `api/`.
-=======
-`netlify.toml` is set with functions directory `api/`.
->>>>>>> 4e59f8e (Vite configuration fixed for Vercel)
