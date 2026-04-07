@@ -1,4 +1,4 @@
-let cache = null;
+﻿let cache = null;
 
 function getEnv() {
   if (cache) return cache;

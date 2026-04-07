@@ -1,4 +1,4 @@
-const { ROLES, SHEETS } = require("./_lib/constants");
+﻿const { ROLES, SHEETS } = require("./_lib/constants");
 const { requireRole } = require("./_lib/auth");
 const { ensureMethod, sendOk } = require("./_lib/http");
 const {

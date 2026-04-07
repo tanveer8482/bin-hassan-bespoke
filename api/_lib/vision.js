@@ -1,4 +1,4 @@
-const { google } = require("googleapis");
+﻿const { google } = require("googleapis");
 const { getEnv } = require("./env");
 const { normalizeText } = require("./utils");
 

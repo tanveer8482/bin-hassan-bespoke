@@ -1,4 +1,4 @@
-const EMPTY_COMPUTED = {
+﻿const EMPTY_COMPUTED = {
   orderTotals: {},
   shopFinancials: {},
   karigarFinancials: {},

@@ -1,4 +1,4 @@
-import { formatDateTime } from "../lib/format";
+﻿import { formatDateTime } from "../lib/format";
 
 export function SyncBar({ lastSynced, offline }) {
   return (

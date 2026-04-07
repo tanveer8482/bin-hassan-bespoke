@@ -1,4 +1,4 @@
-# Bin Hassan Bespoke
+﻿# Bin Hassan Bespoke
 
 Bin Hassan Bespoke is a full-stack tailor workshop system with:
 - React PWA frontend

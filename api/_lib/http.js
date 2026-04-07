@@ -1,4 +1,4 @@
-const { sendJSON } = require("./utils");
+﻿const { sendJSON } = require("./utils");
 
 function ensureMethod(req, allowedMethods) {
   if (allowedMethods.includes(req.method)) return;

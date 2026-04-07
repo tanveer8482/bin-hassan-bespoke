@@ -1,4 +1,4 @@
-const crypto = require("crypto");
+﻿const crypto = require("crypto");
 const { getEnv } = require("./env");
 const { normalizeText } = require("./utils");
 

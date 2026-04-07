@@ -1,4 +1,4 @@
-const { authenticate, createToken } = require("./_lib/auth");
+﻿const { authenticate, createToken } = require("./_lib/auth");
 const { getEnv } = require("./_lib/env");
 const { ensureMethod, sendOk } = require("./_lib/http");
 const { ensureWorkbook, getRecords } = require("./_lib/sheets");

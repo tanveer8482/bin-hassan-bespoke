@@ -1,4 +1,4 @@
-const { requireAuth } = require("./_lib/auth");
+﻿const { requireAuth } = require("./_lib/auth");
 const { ensureMethod, sendOk } = require("./_lib/http");
 const { withErrorHandler } = require("./_lib/utils");
 

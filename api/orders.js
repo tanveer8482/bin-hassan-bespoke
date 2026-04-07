@@ -1,4 +1,4 @@
-const {
+﻿const {
   BUNDLE_PIECE_TYPES,
   ITEM_TYPES,
   PIECE_EXPANSION,

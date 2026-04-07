@@ -1,4 +1,4 @@
-const { ROLES, SHEETS } = require("./_lib/constants");
+﻿const { ROLES, SHEETS } = require("./_lib/constants");
 const {
   computeShopFinancials,
   loadFullSnapshot
