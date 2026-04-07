@@ -7,7 +7,8 @@ function getEnv() {
     "GOOGLE_SHEETS_ID",
     "GOOGLE_SERVICE_ACCOUNT_EMAIL",
     "GOOGLE_PRIVATE_KEY",
-    "JWT_SECRET"
+    "JWT_SECRET",
+    "MY_ADMIN_KEY"
   ];
 
   const missing = required.filter((key) => !process.env[key]);
@@ -22,8 +23,11 @@ function getEnv() {
   cache = {
     sheetsId: process.env.GOOGLE_SHEETS_ID,
     serviceAccountEmail: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-    privateKey: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, "\n"),
+    privateKey: process.env.GOOGLE_PRIVATE_KEY
+      .replace(/\\n/g, "\n")
+      .replace(/\"/g, ""),
     jwtSecret: process.env.JWT_SECRET,
+    myAdminKey: process.env.MY_ADMIN_KEY,
     pollIntervalMs: Number(process.env.POLL_INTERVAL_MS || 20000),
     cloudinaryCloudName: process.env.CLOUDINARY_CLOUD_NAME || "",
     cloudinaryApiKey: process.env.CLOUDINARY_API_KEY || "",

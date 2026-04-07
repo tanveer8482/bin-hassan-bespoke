@@ -56,7 +56,7 @@ module.exports = withErrorHandler(async (req, res) => {
     ]);
 
     const env = getEnv();
-    if (body.bootstrap_key !== env.jwtSecret) {
+    if (body.bootstrap_key !== env.myAdminKey) {
       const error = new Error("Invalid bootstrap key");
       error.statusCode = 401;
       throw error;
