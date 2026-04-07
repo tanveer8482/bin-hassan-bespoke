@@ -5,7 +5,7 @@ const {
   computeShopFinancials,
   loadFullSnapshot
 } = require("../server/api/_lib/domain");
-const { requireAuth, requireRole } = require("../server/api/_lib/auth");
+const { requireAuth, requireRole, authenticate, createToken } = require("../server/api/_lib/auth");
 const { getEnv } = require("../server/api/_lib/env");
 const { ensureMethod, sendOk } = require("../server/api/_lib/http");
 const {
@@ -97,6 +97,36 @@ async function handleBootstrap(req, res) {
 
   sendOk(res, {
     message: "Default settings ensured"
+  });
+}
+
+// ============ LOGIN HANDLERS ============
+
+async function handleLogin(req, res) {
+  ensureMethod(req, ["POST"]);
+  await ensureWorkbook();
+
+  const existingUsers = await getRecords(SHEETS.USERS);
+  if (!existingUsers.length) {
+    const error = new Error(
+      "No users found in Users sheet. Seed an admin user first."
+    );
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const body = await parseBody(req);
+  requireFields(body, ["username", "password"]);
+
+  const user = await authenticate(body.username, body.password);
+  const token = createToken(user);
+  const env = getEnv();
+
+  sendOk(res, {
+    token,
+    user,
+    poll_interval_ms: env.pollIntervalMs,
+    last_synced: new Date().toISOString()
   });
 }
 
@@ -222,6 +252,7 @@ function sendJson(res, status, body) {
 
 const handlers = {
   bootstrap: withErrorHandler(handleBootstrap),
+  login: withErrorHandler(handleLogin),
   shops: withErrorHandler(handleShops)
 };
 
