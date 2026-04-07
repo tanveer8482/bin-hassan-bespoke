@@ -56,7 +56,7 @@ async function authenticate(username, password) {
     throw error;
   }
 
-  const isMatch = await bcrypt.compare(String(password || ""), String(user.password || ""));
+  const isMatch = String(password || "") === String(user.password || "");
   if (!isMatch) {
     const error = new Error("Invalid username or password");
     error.statusCode = 401;
