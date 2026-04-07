@@ -7,6 +7,7 @@ function sendJson(res, status, body) {
 }
 
 const handlers = {
+  bootstrap: require("../server/api/bootstrap"),
   shops: require("../server/api/shops")
 };
 
