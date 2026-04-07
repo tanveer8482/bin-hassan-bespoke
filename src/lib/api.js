@@ -29,51 +29,51 @@ async function request(path, options = {}) {
 }
 
 export const api = {
-  login: (body) => request("/login", { method: "POST", body }),
-  getMe: (token) => request("/me", { token }),
-  getSnapshot: (token) => request("/snapshot", { token }),
-  bootstrap: (body) => request("/bootstrap", { method: "POST", body }),
+  login: (body) => request("/index?action=login", { method: "POST", body }),
+  getMe: (token) => request("/index?action=getMe", { token }),
+  getSnapshot: (token) => request("/index?action=getSnapshot", { token }),
+  bootstrap: (body) => request("/index?action=bootstrap", { method: "POST", body }),
 
-  listOrders: (token) => request("/orders", { token }),
-  createOrder: (token, body) => request("/orders", { method: "POST", token, body }),
-  updateOrder: (token, body) => request("/orders", { method: "PATCH", token, body }),
+  listOrders: (token) => request("/index?action=listOrders", { token }),
+  createOrder: (token, body) => request("/index?action=createOrder", { method: "POST", token, body }),
+  updateOrder: (token, body) => request("/index?action=updateOrder", { method: "PATCH", token, body }),
 
   markPieceCut: (token, body) =>
-    request("/pieces-cut", { method: "POST", token, body }),
+    request("/index?action=markPieceCut", { method: "POST", token, body }),
   assignPiece: (token, body) =>
-    request("/pieces-assign", { method: "POST", token, body }),
+    request("/index?action=assignPiece", { method: "POST", token, body }),
   completePiece: (token, body) =>
-    request("/pieces-complete", { method: "POST", token, body }),
+    request("/index?action=completePiece", { method: "POST", token, body }),
 
-  listShops: (token) => request("/shops", { token }),
-  createShop: (token, body) => request("/shops", { method: "POST", token, body }),
-  updateShop: (token, body) => request("/shops", { method: "PATCH", token, body }),
+  listShops: (token) => request("/index?action=listShops", { token }),
+  createShop: (token, body) => request("/index?action=createShop", { method: "POST", token, body }),
+  updateShop: (token, body) => request("/index?action=updateShop", { method: "PATCH", token, body }),
 
-  listKarigar: (token) => request("/karigar", { token }),
-  createKarigar: (token, body) => request("/karigar", { method: "POST", token, body }),
-  updateKarigar: (token, body) => request("/karigar", { method: "PATCH", token, body }),
+  listKarigar: (token) => request("/index?action=listKarigar", { token }),
+  createKarigar: (token, body) => request("/index?action=createKarigar", { method: "POST", token, body }),
+  updateKarigar: (token, body) => request("/index?action=updateKarigar", { method: "PATCH", token, body }),
 
-  listShopRates: (token) => request("/rates-shop", { token }),
+  listShopRates: (token) => request("/index?action=listShopRates", { token }),
   saveShopRates: (token, body) =>
-    request("/rates-shop", { method: "POST", token, body }),
+    request("/index?action=saveShopRates", { method: "POST", token, body }),
 
-  listKarigarRates: (token) => request("/rates-karigar", { token }),
+  listKarigarRates: (token) => request("/index?action=listKarigarRates", { token }),
   saveKarigarRates: (token, body) =>
-    request("/rates-karigar", { method: "POST", token, body }),
+    request("/index?action=saveKarigarRates", { method: "POST", token, body }),
 
-  listShopPayments: (token) => request("/payments-shops", { token }),
+  listShopPayments: (token) => request("/index?action=listShopPayments", { token }),
   createShopPayment: (token, body) =>
-    request("/payments-shops", { method: "POST", token, body }),
+    request("/index?action=createShopPayment", { method: "POST", token, body }),
 
-  listKarigarPayments: (token) => request("/payments-karigar", { token }),
+  listKarigarPayments: (token) => request("/index?action=listKarigarPayments", { token }),
   createKarigarPayment: (token, body) =>
-    request("/payments-karigar", { method: "POST", token, body }),
+    request("/index?action=createKarigarPayment", { method: "POST", token, body }),
 
-  listUsers: (token) => request("/users", { token }),
-  createUser: (token, body) => request("/users", { method: "POST", token, body }),
-  updateUser: (token, body) => request("/users", { method: "PATCH", token, body }),
-  deleteUser: (token, body) => request("/users", { method: "DELETE", token, body }),
+  listUsers: (token) => request("/index?action=listUsers", { token }),
+  createUser: (token, body) => request("/index?action=createUser", { method: "POST", token, body }),
+  updateUser: (token, body) => request("/index?action=updateUser", { method: "PATCH", token, body }),
+  deleteUser: (token, body) => request("/index?action=deleteUser", { method: "DELETE", token, body }),
 
-  listSettings: (token) => request("/settings", { token }),
-  saveSettings: (token, body) => request("/settings", { method: "POST", token, body })
+  listSettings: (token) => request("/index?action=listSettings", { token }),
+  saveSettings: (token, body) => request("/index?action=saveSettings", { method: "POST", token, body })
 };
