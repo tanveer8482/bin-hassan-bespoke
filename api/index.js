@@ -8,7 +8,7 @@ const {
   refreshOrderStatuses,
   withComputedFields
 } = require("../server/api/_lib/domain");
-const { requireAuth, requireRole, authenticate, createToken } = require("../server/api/_lib/auth");
+const { requireAuth, requireRole, authenticate, createToken, stripPrivateUser } = require("../server/api/_lib/auth");
 const { getEnv } = require("../server/api/_lib/env");
 const { ensureMethod, sendOk } = require("../server/api/_lib/http");
 const {
@@ -19,6 +19,7 @@ const {
 } = require("../server/api/_lib/sheets");
 const {
   id,
+  normalizeKey,
   normalizeText,
   nowISO,
   parseBody,
@@ -229,76 +230,6 @@ async function updateShop(req, res) {
   });
 }
 
-// ============ ME HANDLERS ============
-
-async function handleMe(req, res) {
-  ensureMethod(req, ["GET"]);
-  const user = requireAuth(req);
-
-  sendOk(res, {
-    user,
-    last_synced: new Date().toISOString()
-  });
-}
-
-// ============ SNAPSHOT HANDLERS ============
-
-function stripMeta(record) {
-  const { __rowNumber, ...rest } = record;
-  return rest;
-}
-
-function sanitizeSnapshot(snapshot) {
-  return {
-    ...snapshot,
-    users: snapshot.users.map(stripMeta),
-    shops: snapshot.shops.map(stripMeta),
-    karigars: snapshot.karigars.map(stripMeta),
-    orders: snapshot.orders.map(stripMeta),
-    orderItems: snapshot.orderItems.map(stripMeta),
-    pieces: snapshot.pieces.map(stripMeta),
-    paymentsShops: snapshot.paymentsShops.map(stripMeta),
-    paymentsKarigar: snapshot.paymentsKarigar.map(stripMeta),
-    settings: snapshot.settings.map(stripMeta),
-    shopRates: snapshot.shopRates.map(stripMeta),
-    karigarRates: snapshot.karigarRates.map(stripMeta)
-  };
-}
-
-async function handleSnapshot(req, res) {
-  ensureMethod(req, ["GET"]);
-  const user = requireAuth(req);
-  const env = getEnv();
-
-  await ensureWorkbook();
-  await refreshOrderStatuses();
-
-  const snapshot = await loadFullSnapshot();
-  const withComputed = withComputedFields(snapshot);
-  const filtered = filterSnapshotByRole(user, withComputed);
-
-  sendOk(res, {
-    data: sanitizeSnapshot(filtered),
-    poll_interval_ms: env.pollIntervalMs,
-    last_synced: new Date().toISOString()
-  });
-}
-
-// ============ ORDERS HANDLERS ============
-
-async function handleOrders(req, res) {
-  ensureMethod(req, ["GET"]);
-  const user = requireAuth(req);
-
-  await ensureWorkbook();
-
-  // For now, return empty list - full implementation needed
-  sendOk(res, {
-    orders: [],
-    last_synced: new Date().toISOString()
-  });
-}
-
 async function handleShops(req, res) {
   ensureMethod(req, ["GET", "POST", "PATCH"]);
 
@@ -326,20 +257,16 @@ function sendJson(res, status, body) {
 const handlers = {
   bootstrap: withErrorHandler(handleBootstrap),
   login: withErrorHandler(handleLogin),
-  me: withErrorHandler(handleMe),
-  orders: withErrorHandler(handleOrders),
-  shops: withErrorHandler(handleShops),
-  snapshot: withErrorHandler(handleSnapshot)
+  shops: withErrorHandler(handleShops)
 };
 
 module.exports = async function (req, res) {
   const url = new URL(req.url || "/", "http://localhost");
-  const segments = url.pathname.replace(/^\/+/g, "").split("/").filter(Boolean);
-  const route = segments[0] === "api" ? segments[1] : segments[0];
+  const action = url.searchParams.get('action');
 
-  if (!route || !handlers[route]) {
+  if (!action || !handlers[action]) {
     return sendJson(res, 404, { error: "Not found" });
   }
 
-  return handlers[route](req, res);
+  return handlers[action](req, res);
 };
