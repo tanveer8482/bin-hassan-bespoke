@@ -6,10 +6,7 @@
       "maxDuration": 10
     }
   },
-  "rewrites": [
-    { "source": "/api/login", "destination": "/api/index?action=login" },
-    { "source": "/api/(.*)", "destination": "/api/index?action=$1" }
-  ]
+  "rewrites": []
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
