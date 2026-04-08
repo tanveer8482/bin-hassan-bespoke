@@ -29,6 +29,7 @@ async function request(path, options = {}) {
 }
 
 export const api = {
+  // All API calls now use the consolidated /api/index?action=... endpoint
   login: (body) => request("/index?action=login", { method: "POST", body }),
   getMe: (token) => request("/index?action=getMe", { token }),
   getSnapshot: (token) => request("/index?action=getSnapshot", { token }),
