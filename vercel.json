@@ -6,7 +6,8 @@
       "maxDuration": 10
     }
   },
-  "rewrites": []
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/index?action=$1" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
