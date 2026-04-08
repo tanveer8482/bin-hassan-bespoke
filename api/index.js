@@ -246,6 +246,235 @@ async function handleShops(req, res) {
   return updateShop(req, res);
 }
 
+// ============ KARIGAR HANDLERS ============
+
+async function listKarigar(res, user) {
+  requireRole(user, [ROLES.ADMIN, ROLES.CUTTING]);
+
+  const records = await getRecords(SHEETS.KARIGAR);
+
+  sendOk(res, records);
+}
+
+async function createKarigar(req, res) {
+  requireRole(req, [ROLES.ADMIN]);
+  await ensureWorkbook();
+
+  const body = await parseBody(req);
+  requireFields(body, ["name"]);
+
+  const karigarId = normalizeText(body.karigar_id) || id("karigar");
+
+  const existing = await getRecords(SHEETS.KARIGAR);
+  if (existing.some((karigar) => karigar.karigar_id === karigarId)) {
+    const error = new Error("karigar_id already exists");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const now = nowISO();
+  const record = {
+    karigar_id: karigarId,
+    name: normalizeText(body.name),
+    contact: normalizeText(body.contact),
+    created_date: now
+  };
+
+  await appendRecord(SHEETS.KARIGAR, record);
+
+  sendOk(res, {
+    message: "Karigar created",
+    karigar: record
+  });
+}
+
+async function updateKarigar(req, res) {
+  requireRole(req, [ROLES.ADMIN]);
+  await ensureWorkbook();
+
+  const body = await parseBody(req);
+  requireFields(body, ["karigar_id"]);
+
+  const patch = {};
+  if (body.name !== undefined) patch.name = normalizeText(body.name);
+  if (body.contact !== undefined) patch.contact = normalizeText(body.contact);
+
+  if (!Object.keys(patch).length) {
+    const error = new Error("No updatable fields provided");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const updated = await updateByField(SHEETS.KARIGAR, "karigar_id", body.karigar_id, patch);
+
+  sendOk(res, {
+    message: "Karigar updated",
+    karigar: stripMeta(updated)
+  });
+}
+
+async function handleKarigar(req, res) {
+  ensureMethod(req, ["GET", "POST", "PATCH"]);
+
+  const user = requireAuth(req);
+
+  if (req.method === "GET") {
+    return listKarigar(res, user);
+  }
+
+  if (req.method === "POST") {
+    return createKarigar(req, res);
+  }
+
+  return updateKarigar(req, res);
+}
+
+// ============ USERS HANDLERS ============
+
+async function listUsers(res, user) {
+  requireRole(user, [ROLES.ADMIN]);
+
+  const records = await getRecords(SHEETS.USERS);
+
+  sendOk(res, records.map(stripMeta));
+}
+
+async function createUser(req, res) {
+  requireRole(req, [ROLES.ADMIN]);
+  await ensureWorkbook();
+
+  const body = await parseBody(req);
+  requireFields(body, ["username", "password", "role", "display_name"]);
+
+  const username = normalizeText(body.username);
+
+  const existing = await getRecords(SHEETS.USERS);
+  if (existing.some((user) => normalizeKey(user.username) === normalizeKey(username))) {
+    const error = new Error("username already exists");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const record = {
+    username,
+    password: body.password,
+    role: body.role,
+    display_name: normalizeText(body.display_name),
+    entity_id: body.entity_id || ""
+  };
+
+  await appendRecord(SHEETS.USERS, record);
+
+  sendOk(res, {
+    message: "User created",
+    user: stripPrivateUser(record)
+  });
+}
+
+async function updateUser(req, res) {
+  requireRole(req, [ROLES.ADMIN]);
+  await ensureWorkbook();
+
+  const body = await parseBody(req);
+  requireFields(body, ["username"]);
+
+  const patch = {};
+  if (body.new_username !== undefined) patch.username = normalizeText(body.new_username);
+  if (body.password !== undefined) patch.password = body.password;
+  if (body.role !== undefined) patch.role = body.role;
+  if (body.display_name !== undefined) patch.display_name = normalizeText(body.display_name);
+  if (body.entity_id !== undefined) patch.entity_id = body.entity_id;
+
+  if (!Object.keys(patch).length) {
+    const error = new Error("No updatable fields provided");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const updated = await updateByField(SHEETS.USERS, "username", body.username, patch);
+
+  sendOk(res, {
+    message: "User updated",
+    user: stripPrivateUser(stripMeta(updated))
+  });
+}
+
+async function deleteUser(req, res) {
+  requireRole(req, [ROLES.ADMIN]);
+  await ensureWorkbook();
+
+  const body = await parseBody(req);
+  requireFields(body, ["username"]);
+
+  const updated = await updateByField(SHEETS.USERS, "username", body.username, { role: "deleted" });
+
+  sendOk(res, {
+    message: "User deleted"
+  });
+}
+
+async function handleUsers(req, res) {
+  ensureMethod(req, ["GET", "POST", "PATCH", "DELETE"]);
+
+  const user = requireAuth(req);
+
+  if (req.method === "GET") {
+    return listUsers(res, user);
+  }
+
+  if (req.method === "POST") {
+    return createUser(req, res);
+  }
+
+  if (req.method === "PATCH") {
+    return updateUser(req, res);
+  }
+
+  return deleteUser(req, res);
+}
+
+// ============ ME HANDLERS ============
+
+async function handleMe(req, res) {
+  ensureMethod(req, ["GET"]);
+  const user = requireAuth(req);
+
+  sendOk(res, {
+    user,
+    last_synced: new Date().toISOString()
+  });
+}
+
+// ============ SNAPSHOT HANDLERS ============
+
+async function handleSnapshot(req, res) {
+  ensureMethod(req, ["GET"]);
+  const user = requireAuth(req);
+
+  const snapshot = await loadFullSnapshot();
+  const filtered = filterSnapshotByRole(snapshot, user);
+
+  sendOk(res, filtered);
+}
+
+// ============ ORDERS HANDLERS ============
+
+async function handleOrders(req, res) {
+  ensureMethod(req, ["GET", "POST", "PATCH"]);
+
+  const user = requireAuth(req);
+
+  if (req.method === "GET") {
+    return listOrders(res, user);
+  }
+
+  if (req.method === "POST") {
+    return createOrder(req, res);
+  }
+
+  return updateOrder(req, res);
+}
+
 // ============ ROUTER ============
 
 function sendJson(res, status, body) {
@@ -257,7 +486,34 @@ function sendJson(res, status, body) {
 const handlers = {
   bootstrap: withErrorHandler(handleBootstrap),
   login: withErrorHandler(handleLogin),
-  shops: withErrorHandler(handleShops)
+  getMe: withErrorHandler(handleMe),
+  getSnapshot: withErrorHandler(handleSnapshot),
+  listOrders: withErrorHandler(async (req, res) => { req.method = 'GET'; return handleOrders(req, res); }),
+  createOrder: withErrorHandler(async (req, res) => { req.method = 'POST'; return handleOrders(req, res); }),
+  updateOrder: withErrorHandler(async (req, res) => { req.method = 'PATCH'; return handleOrders(req, res); }),
+  markPieceCut: withErrorHandler(handlePieceCut),
+  assignPiece: withErrorHandler(handlePieceAssign),
+  completePiece: withErrorHandler(handlePieceComplete),
+  listShops: withErrorHandler(async (req, res) => { req.method = 'GET'; return handleShops(req, res); }),
+  createShop: withErrorHandler(async (req, res) => { req.method = 'POST'; return handleShops(req, res); }),
+  updateShop: withErrorHandler(async (req, res) => { req.method = 'PATCH'; return handleShops(req, res); }),
+  listKarigar: withErrorHandler(async (req, res) => { req.method = 'GET'; return handleKarigar(req, res); }),
+  createKarigar: withErrorHandler(async (req, res) => { req.method = 'POST'; return handleKarigar(req, res); }),
+  updateKarigar: withErrorHandler(async (req, res) => { req.method = 'PATCH'; return handleKarigar(req, res); }),
+  listShopRates: withErrorHandler(async (req, res) => { req.method = 'GET'; return handleShopRates(req, res); }),
+  saveShopRates: withErrorHandler(async (req, res) => { req.method = 'POST'; return handleShopRates(req, res); }),
+  listKarigarRates: withErrorHandler(async (req, res) => { req.method = 'GET'; return handleKarigarRates(req, res); }),
+  saveKarigarRates: withErrorHandler(async (req, res) => { req.method = 'POST'; return handleKarigarRates(req, res); }),
+  listShopPayments: withErrorHandler(async (req, res) => { req.method = 'GET'; return handlePaymentsShops(req, res); }),
+  createShopPayment: withErrorHandler(async (req, res) => { req.method = 'POST'; return handlePaymentsShops(req, res); }),
+  listKarigarPayments: withErrorHandler(async (req, res) => { req.method = 'GET'; return handlePaymentsKarigar(req, res); }),
+  createKarigarPayment: withErrorHandler(async (req, res) => { req.method = 'POST'; return handlePaymentsKarigar(req, res); }),
+  listUsers: withErrorHandler(async (req, res) => { req.method = 'GET'; return handleUsers(req, res); }),
+  createUser: withErrorHandler(async (req, res) => { req.method = 'POST'; return handleUsers(req, res); }),
+  updateUser: withErrorHandler(async (req, res) => { req.method = 'PATCH'; return handleUsers(req, res); }),
+  deleteUser: withErrorHandler(async (req, res) => { req.method = 'DELETE'; return handleUsers(req, res); }),
+  listSettings: withErrorHandler(async (req, res) => { req.method = 'GET'; return handleSettings(req, res); }),
+  saveSettings: withErrorHandler(async (req, res) => { req.method = 'POST'; return handleSettings(req, res); })
 };
 
 module.exports = async function (req, res) {
