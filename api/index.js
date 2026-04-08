@@ -1050,6 +1050,14 @@ const handlers = {
 };
 
 module.exports = async function (req, res) {
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PATCH, DELETE');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+  if (req.method === 'OPTIONS') {
+    res.statusCode = 200;
+    return res.end();
+  }
+
   const url = new URL(req.url || "/", "http://localhost");
   const action = url.searchParams.get('action');
 
