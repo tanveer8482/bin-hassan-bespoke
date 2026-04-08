@@ -1008,48 +1008,6 @@ async function handleUsers(req, res) {
   return deleteUser(req, res);
 }
 
-// ============ ME HANDLERS ============
-
-async function handleMe(req, res) {
-  ensureMethod(req, ["GET"]);
-  const user = requireAuth(req);
-
-  sendOk(res, {
-    user,
-    last_synced: new Date().toISOString()
-  });
-}
-
-// ============ SNAPSHOT HANDLERS ============
-
-async function handleSnapshot(req, res) {
-  ensureMethod(req, ["GET"]);
-  const user = requireAuth(req);
-
-  const snapshot = await loadFullSnapshot();
-  const filtered = filterSnapshotByRole(snapshot, user);
-
-  sendOk(res, filtered);
-}
-
-// ============ ORDERS HANDLERS ============
-
-async function handleOrders(req, res) {
-  ensureMethod(req, ["GET", "POST", "PATCH"]);
-
-  const user = requireAuth(req);
-
-  if (req.method === "GET") {
-    return listOrders(res, user);
-  }
-
-  if (req.method === "POST") {
-    return createOrder(req, res);
-  }
-
-  return updateOrder(req, res);
-}
-
 // ============ ROUTER ============
 
 function sendJson(res, status, body) {
