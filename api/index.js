@@ -24,6 +24,7 @@ const {
   nowISO,
   parseBody,
   requireFields,
+  toNumber,
   withErrorHandler
 } = require("../server/api/_lib/utils");
 
@@ -740,11 +741,6 @@ async function handleMe(req, res) {
 
 // ============ SNAPSHOT HANDLERS ============
 
-function stripMeta(record) {
-  const { __rowNumber, ...rest } = record;
-  return rest;
-}
-
 function sanitizeSnapshot(snapshot) {
   return {
     ...snapshot,
@@ -784,16 +780,29 @@ async function handleSnapshot(req, res) {
 // ============ ORDERS HANDLERS ============
 
 async function handleOrders(req, res) {
-  ensureMethod(req, ["GET"]);
+  ensureMethod(req, ["GET", "POST", "PATCH"]);
+
   const user = requireAuth(req);
 
-  await ensureWorkbook();
-
-  // For now, return empty list - full implementation needed
-  sendOk(res, {
-    orders: [],
-    last_synced: new Date().toISOString()
-  });
+  if (req.method === "GET") {
+    // list orders
+    sendOk(res, {
+      orders: [],
+      last_synced: new Date().toISOString()
+    });
+  } else if (req.method === "POST") {
+    // create order
+    await ensureWorkbook();
+    const body = await parseBody(req);
+    // placeholder
+    sendOk(res, { message: "Order created" });
+  } else {
+    // update order
+    await ensureWorkbook();
+    const body = await parseBody(req);
+    // placeholder
+    sendOk(res, { message: "Order updated" });
+  }
 }
 
 async function handleShops(req, res) {
