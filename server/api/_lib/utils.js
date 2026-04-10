@@ -61,11 +61,19 @@ function withErrorHandler(handler) {
     try {
       await handler(req, res);
     } catch (error) {
+      console.error("[API HANDLER ERROR]", req.method, req.url, error);
+
       const statusCode = error.statusCode || 500;
-      sendJSON(res, statusCode, {
+      const payload = {
         ok: false,
         message: error.message || "Server error"
-      });
+      };
+
+      if (process.env.NODE_ENV !== "production") {
+        payload.stack = error.stack;
+      }
+
+      sendJSON(res, statusCode, payload);
     }
   };
 }

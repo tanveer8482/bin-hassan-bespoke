@@ -82,6 +82,8 @@ export default function App() {
   const [user, setUser] = useState(() => getStoredJson(STORAGE_USER, null));
 
   const [data, setData] = useState(emptySnapshot());
+  const [settings, setSettings] = useState([]);
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [pollIntervalMs, setPollIntervalMs] = useState(DEFAULT_POLL_MS);
   const [lastSynced, setLastSynced] = useState("");
 
@@ -106,10 +108,22 @@ export default function App() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!notice) return;
+
+    const timer = window.setTimeout(() => {
+      setNotice("");
+    }, 6000);
+
+    return () => window.clearTimeout(timer);
+  }, [notice]);
+
   const logout = useCallback(() => {
     setToken("");
     setUser(null);
     setData(emptySnapshot());
+    setSettings([]);
+    setSettingsLoaded(false);
     setBusyAction("");
     setError("");
     setNotice("");
@@ -127,7 +141,19 @@ export default function App() {
 
       try {
         const response = await api.getSnapshot(currentToken);
-        setData(response.data || emptySnapshot());
+        const snapshotData = response.data || emptySnapshot();
+        
+        // Cache settings separately to avoid refetching
+        if (snapshotData.settings && (!settingsLoaded || JSON.stringify(snapshotData.settings) !== JSON.stringify(settings))) {
+          setSettings(snapshotData.settings);
+          setSettingsLoaded(true);
+        }
+        
+        // Remove settings from the main data to prevent unnecessary re-renders
+        const dataWithoutSettings = { ...snapshotData };
+        delete dataWithoutSettings.settings;
+        
+        setData(dataWithoutSettings);
         setPollIntervalMs(response.poll_interval_ms || DEFAULT_POLL_MS);
         setLastSynced(response.last_synced || new Date().toISOString());
         setError("");
@@ -191,7 +217,7 @@ export default function App() {
   }, [token, pollIntervalMs, refreshSnapshot]);
 
   const runAction = useCallback(
-    async (actionKey, fn, noticeText = "Saved") => {
+    async (actionKey, fn, noticeText = "Saved", skipRefresh = false) => {
       if (!token) return false;
 
       setBusyAction(actionKey);
@@ -200,7 +226,9 @@ export default function App() {
 
       try {
         await fn();
-        await refreshSnapshot(token, { silent: true });
+        if (!skipRefresh) {
+          await refreshSnapshot(token, { silent: true });
+        }
         setNotice(noticeText);
         return true;
       } catch (actionError) {
@@ -216,7 +244,7 @@ export default function App() {
   const actions = useMemo(() => {
     return {
       createOrder: (payload) =>
-        runAction("createOrder", () => api.createOrder(token, payload), "Order created"),
+        runAction("createOrder", () => api.createOrder(token, payload), "Order created", true),
       updateOrder: (payload) =>
         runAction(
           payload.status === "delivered" ? `deliver:${payload.order_id}` : "updateOrder",
@@ -343,7 +371,7 @@ export default function App() {
       {loading ? <p className="muted">Loading latest data...</p> : null}
 
       {!loading && user?.role === "admin" ? (
-        <AdminApp data={data} actions={actions} busyAction={busyAction} />
+        <AdminApp data={{ ...data, settings }} actions={actions} busyAction={busyAction} />
       ) : null}
 
       {!loading && user?.role === "karigar" ? (

@@ -1,6 +1,6 @@
 const { URL } = require("url");
 const bcrypt = require("bcryptjs");
-const { ROLES, SHEETS } = require("../server/api/_lib/constants");
+const { PIECE_EXPANSION, ROLES, SHEETS, STATUS } = require("../server/api/_lib/constants");
 const {
   computeShopFinancials,
   filterSnapshotByRole,
@@ -17,6 +17,7 @@ const {
   getRecords,
   updateByField
 } = require("../server/api/_lib/sheets");
+const { resolvePhotoInput } = require("../server/api/_lib/media");
 const {
   id,
   normalizeKey,
@@ -24,6 +25,7 @@ const {
   nowISO,
   parseBody,
   requireFields,
+  sendJSON,
   toNumber,
   withErrorHandler
 } = require("../server/api/_lib/utils");
@@ -785,24 +787,133 @@ async function handleOrders(req, res) {
   const user = requireAuth(req);
 
   if (req.method === "GET") {
-    // list orders
     sendOk(res, {
       orders: [],
       last_synced: new Date().toISOString()
     });
-  } else if (req.method === "POST") {
-    // create order
-    await ensureWorkbook();
-    const body = await parseBody(req);
-    // placeholder
-    sendOk(res, { message: "Order created" });
-  } else {
-    // update order
-    await ensureWorkbook();
-    const body = await parseBody(req);
-    // placeholder
-    sendOk(res, { message: "Order updated" });
+    return;
   }
+
+  requireRole(req, [ROLES.ADMIN]);
+  await ensureWorkbook();
+
+  const body = await parseBody(req);
+
+  if (req.method === "POST") {
+    requireFields(body, ["order_number", "shop_id", "delivery_date", "slip_photo_data_url", "items"]);
+
+    if (!Array.isArray(body.items) || body.items.length === 0) {
+      const error = new Error("Order items are required");
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const now = nowISO();
+    const photoResult = await resolvePhotoInput({
+      photoDataUrl: body.slip_photo_data_url,
+      folder: "slips"
+    });
+
+    const orderId = id("order");
+    const orderRecord = {
+      order_id: orderId,
+      order_number: normalizeText(body.order_number),
+      shop_id: normalizeText(body.shop_id),
+      delivery_date: normalizeText(body.delivery_date),
+      designing_enabled: String(body.designing_enabled === true || normalizeKey(body.designing_enabled) === "true"),
+      designing_shop_charge: toNumber(body.designing_shop_charge),
+      slip_photo_url: photoResult.photoUrl,
+      status: STATUS.ORDER.PENDING,
+      created_date: now,
+      updated_date: now
+    };
+
+    await appendRecord(SHEETS.ORDERS, orderRecord);
+
+    for (const item of body.items) {
+      const itemId = id("item");
+      const itemType = normalizeText(item.item_type || "normal");
+      const pieceType = normalizeText(item.piece_type || "coat");
+      const measurementPhotoUrl = normalizeText(item.measurement_photo_url);
+
+      const itemRecord = {
+        item_id: itemId,
+        order_id: orderId,
+        item_type: itemType,
+        piece_type: pieceType,
+        status: "pending",
+        item_rate: toNumber(item.item_rate),
+        measurement_photo_url: measurementPhotoUrl
+      };
+
+      await appendRecord(SHEETS.ORDER_ITEMS, itemRecord);
+
+      const pieceNames = PIECE_EXPANSION[pieceType] || [pieceType];
+      for (const pieceName of pieceNames) {
+        const pieceRecord = {
+          piece_id: id("piece"),
+          item_id: itemId,
+          order_id: orderId,
+          piece_name: pieceName,
+          item_type: itemType,
+          cutting_done: false,
+          cutting_by: "",
+          cutting_date: "",
+          assigned_karigar_id: "",
+          assigned_date: "",
+          karigar_status: STATUS.KARIGAR.NOT_ASSIGNED,
+          karigar_complete_date: "",
+          measurement_photo_url: measurementPhotoUrl,
+          reference_slip_url: photoResult.photoUrl,
+          cutting_photo_url: "",
+          cutting_verified: false,
+          cutting_verified_date: "",
+          completion_photo_url: "",
+          completion_verified: false,
+          completion_verified_date: "",
+          designing_karigar_charge: 0,
+          shop_rate: 0,
+          karigar_rate: 0,
+          bundle_piece_type: pieceType,
+          created_date: now,
+          updated_date: now
+        };
+
+        await appendRecord(SHEETS.PIECES, pieceRecord);
+      }
+    }
+
+    sendOk(res, {
+      message: "Order created",
+      order: orderRecord
+    });
+    return;
+  }
+
+  requireFields(body, ["order_id"]);
+
+  const patch = {};
+  if (body.status !== undefined) patch.status = normalizeText(body.status);
+  if (body.delivery_date !== undefined) patch.delivery_date = normalizeText(body.delivery_date);
+  if (body.designing_enabled !== undefined)
+    patch.designing_enabled = String(body.designing_enabled === true || normalizeKey(body.designing_enabled) === "true");
+  if (body.designing_shop_charge !== undefined)
+    patch.designing_shop_charge = toNumber(body.designing_shop_charge);
+
+  if (!Object.keys(patch).length) {
+    const error = new Error("No updatable fields provided");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  patch.updated_date = nowISO();
+
+  const updated = await updateByField(SHEETS.ORDERS, "order_id", body.order_id, patch);
+
+  sendOk(res, {
+    message: "Order updated",
+    order: updated
+  });
 }
 
 async function handleShops(req, res) {
@@ -1050,20 +1161,35 @@ const handlers = {
 };
 
 module.exports = async function (req, res) {
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PATCH, DELETE');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PATCH, DELETE");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
 
-  if (req.method === 'OPTIONS') {
+  if (req.method === "OPTIONS") {
     res.statusCode = 200;
     return res.end();
   }
 
   const url = new URL(req.url || "/", "http://localhost");
-  const action = url.searchParams.get('action');
+  const action = url.searchParams.get("action");
 
   if (!action || !handlers[action]) {
-    return sendJson(res, 404, { error: "Not found" });
+    console.error("[API ROUTER] Unknown action", action, req.method, req.url);
+    return sendJSON(res, 404, {
+      ok: false,
+      message: `Not found: ${action || "<none>"}`
+    });
   }
 
-  return handlers[action](req, res);
+  try {
+    return await handlers[action](req, res);
+  } catch (error) {
+    console.error("[API ROUTER ERROR]", req.method, req.url, error);
+    const payload = {
+      ok: false,
+      message: error.message || "Server error"
+    };
+    if (process.env.NODE_ENV !== "production") payload.stack = error.stack;
+    return sendJSON(res, error.statusCode || 500, payload);
+  }
 };

@@ -1,31 +1,49 @@
 ﻿const API_BASE = "/api";
 
+const REQUEST_TIMEOUT_MS = 10000;
+
 async function request(path, options = {}) {
-  const response = await fetch(`${API_BASE}${path}`, {
-    method: options.method || "GET",
-    headers: {
-      "Content-Type": "application/json",
-      ...(options.token
-        ? {
-            Authorization: `Bearer ${options.token}`
-          }
-        : {}),
-      ...(options.headers || {})
-    },
-    body: options.body ? JSON.stringify(options.body) : undefined
-  });
+  const controller = new AbortController();
+  const timeout = options.timeout || REQUEST_TIMEOUT_MS;
+  const timer = window.setTimeout(() => controller.abort(), timeout);
 
-  const payload = await response.json().catch(() => ({}));
+  try {
+    const response = await fetch(`${API_BASE}${path}`, {
+      method: options.method || "GET",
+      headers: {
+        "Content-Type": "application/json",
+        ...(options.token
+          ? {
+              Authorization: `Bearer ${options.token}`
+            }
+          : {}),
+        ...(options.headers || {})
+      },
+      body: options.body ? JSON.stringify(options.body) : undefined,
+      signal: controller.signal
+    });
 
-  if (!response.ok || payload.ok === false) {
-    const message = payload.message || `Request failed (${response.status})`;
-    const error = new Error(message);
-    error.status = response.status;
-    error.payload = payload;
+    const payload = await response.json().catch(() => ({}));
+
+    if (!response.ok || payload.ok === false) {
+      const message = payload.message || `Request failed (${response.status})`;
+      const error = new Error(message);
+      error.status = response.status;
+      error.payload = payload;
+      throw error;
+    }
+
+    return payload;
+  } catch (error) {
+    if (error.name === "AbortError") {
+      const timeoutError = new Error("Request timed out after 10 seconds");
+      timeoutError.status = 408;
+      throw timeoutError;
+    }
     throw error;
+  } finally {
+    window.clearTimeout(timer);
   }
-
-  return payload;
 }
 
 export const api = {
