@@ -1,5 +1,5 @@
 ﻿
-import { useMemo, useState } from "react";
+import { useMemo, useState, useCallback } from "react";
 import { StatusBadge } from "../../components/StatusBadge";
 import {
   byId,
@@ -26,6 +26,18 @@ const TAB_LIST = [
   { key: "track", label: "Track & Alerts" },
   { key: "settings", label: "Settings" }
 ];
+
+function debounce(func, wait) {
+  let timeout;
+  return function executedFunction(...args) {
+    const later = () => {
+      clearTimeout(timeout);
+      func(...args);
+    };
+    clearTimeout(timeout);
+    timeout = setTimeout(later, wait);
+  };
+}
 
 function emptyOrderItem() {
   return {
@@ -64,6 +76,73 @@ function readFileAsDataUrl(file) {
     reader.onerror = () => reject(new Error("Unable to read file"));
     reader.readAsDataURL(file);
   });
+}
+
+function getBase64Size(dataUrl) {
+  const base64 = (dataUrl || "").split(",")[1] || "";
+  const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
+  return Math.round((base64.length * 3) / 4 - padding);
+}
+
+function loadImageForCompression(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Unable to load image"));
+    };
+    image.src = url;
+  });
+}
+
+async function compressImageFile(file, maxDimension = 1024, targetKb = 300) {
+  if (!file || !file.type.startsWith("image/")) {
+    throw new Error("Unsupported file type");
+  }
+
+  const image = await loadImageForCompression(file);
+  let { width, height } = image;
+  const maxSide = Math.max(width, height);
+  if (maxSide > maxDimension) {
+    const ratio = maxDimension / maxSide;
+    width = Math.round(width * ratio);
+    height = Math.round(height * ratio);
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(image, 0, 0, width, height);
+
+  let quality = 0.92;
+  let dataUrl = canvas.toDataURL("image/jpeg", quality);
+  let size = getBase64Size(dataUrl);
+  const minBytes = 200 * 1024;
+  const maxBytes = 500 * 1024;
+  let attempts = 0;
+
+  while (attempts < 8 && size > maxBytes) {
+    quality = Math.max(0.45, quality * Math.min(0.9, maxBytes / size));
+    dataUrl = canvas.toDataURL("image/jpeg", quality);
+    size = getBase64Size(dataUrl);
+    attempts += 1;
+  }
+
+  attempts = 0;
+  while (attempts < 4 && size < minBytes && quality < 0.99) {
+    quality = Math.min(0.99, quality + 0.05);
+    dataUrl = canvas.toDataURL("image/jpeg", quality);
+    size = getBase64Size(dataUrl);
+    attempts += 1;
+  }
+
+  return dataUrl;
 }
 
 export function AdminApp({ data, actions, busyAction }) {
@@ -146,6 +225,19 @@ export function AdminApp({ data, actions, busyAction }) {
       return map;
     }, {});
   }, [data.pieces]);
+
+  const debouncedSetOrderFilter = useCallback(
+    debounce((newFilter) => setOrderFilter(newFilter), 300),
+    []
+  );
+
+  const handleShopFilterChange = useCallback((value) => {
+    debouncedSetOrderFilter((current) => ({ ...current, shop_id: value }));
+  }, [debouncedSetOrderFilter]);
+
+  const handleStatusFilterChange = useCallback((value) => {
+    debouncedSetOrderFilter((current) => ({ ...current, status: value }));
+  }, [debouncedSetOrderFilter]);
 
   const filteredOrders = useMemo(() => {
     return data.orders.filter((order) => {
@@ -304,7 +396,7 @@ export function AdminApp({ data, actions, busyAction }) {
     if (!file) return;
 
     try {
-      const dataUrl = await readFileAsDataUrl(file);
+      const dataUrl = await compressImageFile(file, 1024, 300);
       setOrderForm((current) => ({
         ...current,
         slip_photo_data_url: dataUrl,
@@ -323,7 +415,7 @@ export function AdminApp({ data, actions, busyAction }) {
     if (!file) return;
 
     try {
-      const dataUrl = await readFileAsDataUrl(file);
+      const dataUrl = await compressImageFile(file, 1024, 300);
       await actions.markPieceCut({
         piece_id: pieceId,
         photo_data_url: dataUrl
@@ -808,12 +900,7 @@ export function AdminApp({ data, actions, busyAction }) {
                 <select
                   className="input"
                   value={orderFilter.shop_id}
-                  onChange={(event) =>
-                    setOrderFilter((current) => ({
-                      ...current,
-                      shop_id: event.target.value
-                    }))
-                  }
+                  onChange={(event) => handleShopFilterChange(event.target.value)}
                 >
                   <option value="all">All Shops</option>
                   {data.shops.map((shop) => (
@@ -826,12 +913,7 @@ export function AdminApp({ data, actions, busyAction }) {
                 <select
                   className="input"
                   value={orderFilter.status}
-                  onChange={(event) =>
-                    setOrderFilter((current) => ({
-                      ...current,
-                      status: event.target.value
-                    }))
-                  }
+                  onChange={(event) => handleStatusFilterChange(event.target.value)}
                 >
                   <option value="all">All Status</option>
                   {Object.keys(ORDER_STATUS_META).map((status) => (
