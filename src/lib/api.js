@@ -1,4 +1,4 @@
-﻿const API_BASE = "/api";
+const API_BASE = "/api";
 
 const REQUEST_TIMEOUT_MS = 10000;
 
@@ -7,14 +7,19 @@ async function request(path, options = {}) {
   const timeout = options.timeout || REQUEST_TIMEOUT_MS;
   const timer = window.setTimeout(() => controller.abort(), timeout);
 
+  let requestToken = options.token;
+  if (!requestToken && typeof window !== "undefined") {
+    requestToken = window.localStorage.getItem("bhb_token") || "";
+  }
+
   try {
     const response = await fetch(`${API_BASE}${path}`, {
       method: options.method || "GET",
       headers: {
         "Content-Type": "application/json",
-        ...(options.token
+        ...(requestToken
           ? {
-              Authorization: `Bearer ${options.token}`
+              Authorization: `Bearer ${requestToken}`
             }
           : {}),
         ...(options.headers || {})
@@ -48,7 +53,16 @@ async function request(path, options = {}) {
 
 export const api = {
   // All API calls now use the consolidated /api/index?action=... endpoint
-  login: (body) => request("/index?action=login", { method: "POST", body }),
+  login: async (body) => {
+    const res = await request("/index?action=login", { method: "POST", body });
+    if (res && res.token && typeof window !== "undefined") {
+      window.localStorage.setItem("bhb_token", res.token);
+      if (res.user) {
+        window.localStorage.setItem("bhb_user", JSON.stringify(res.user));
+      }
+    }
+    return res;
+  },
   getMe: (token) => request("/index?action=getMe", { token }),
   getSnapshot: (token) => request("/index?action=getSnapshot", { token }),
   bootstrap: (body) => request("/index?action=bootstrap", { method: "POST", body }),
