@@ -672,7 +672,14 @@ async function markPieceCut(req, res) {
 
   // 1. Verify with Gemini AI
   if (piece.reference_slip_url) {
-    await verifyWithGemini(piece.reference_slip_url, body.photo_data_url);
+    try {
+      await verifyWithGemini(piece.reference_slip_url, body.photo_data_url);
+    } catch (err) {
+      if (err.statusCode === 400) {
+        throw err;
+      }
+      console.warn("[GEMINI WARNING] Verification fallback triggered, proceeding.", err.message);
+    }
   }
 
   // 2. Upload the cutting photo

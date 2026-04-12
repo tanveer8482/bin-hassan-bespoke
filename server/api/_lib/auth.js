@@ -94,12 +94,18 @@ function parseAuthHeader(req) {
     }
   }
 
-  if (!auth.startsWith("Bearer ")) {
-    const error = new Error("Unauthorized");
+  if (!auth) {
+    const error = new Error("Unauthorized: No token provided");
     error.statusCode = 401;
     throw error;
   }
-  return auth.replace("Bearer ", "");
+
+  auth = auth.trim();
+  if (auth.toLowerCase().startsWith("bearer ")) {
+    auth = auth.substring(7).trim();
+  }
+
+  return auth;
 }
 
 function requireAuth(req) {
