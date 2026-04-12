@@ -13,11 +13,13 @@ const { getEnv } = require("../server/api/_lib/env");
 const { ensureMethod, sendOk } = require("../server/api/_lib/http");
 const {
   appendRecord,
+  appendRecords,
   ensureWorkbook,
   getRecords,
   updateByField
 } = require("../server/api/_lib/sheets");
-const { resolvePhotoInput } = require("../server/api/_lib/media");
+const { resolvePhotoInput, uploadDataUrlToCloudinary } = require("../server/api/_lib/media");
+const { verifyWithGemini } = require("../server/api/_lib/gemini");
 const {
   id,
   normalizeKey,
@@ -657,12 +659,32 @@ async function markPieceCut(req, res) {
   await ensureWorkbook();
 
   const body = await parseBody(req);
-  requireFields(body, ["piece_id"]);
+  requireFields(body, ["piece_id", "photo_data_url"]);
+
+  const allPieces = await getRecords(SHEETS.PIECES);
+  const piece = allPieces.find(p => p.piece_id === body.piece_id);
+
+  if (!piece) {
+    const error = new Error("Piece not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  // 1. Verify with Gemini AI
+  if (piece.reference_slip_url) {
+    await verifyWithGemini(piece.reference_slip_url, body.photo_data_url);
+  }
+
+  // 2. Upload the cutting photo
+  const cuttingPhotoUrl = await uploadDataUrlToCloudinary(body.photo_data_url, "cutting");
 
   const updates = {
     cutting_done: true,
     cutting_by: user.username,
-    cutting_date: nowISO()
+    cutting_date: nowISO(),
+    cutting_photo_url: cuttingPhotoUrl,
+    cutting_verified: true,
+    cutting_verified_date: nowISO()
   };
 
   await updateByField(SHEETS.PIECES, "piece_id", body.piece_id, updates);
@@ -830,6 +852,9 @@ async function handleOrders(req, res) {
 
     await appendRecord(SHEETS.ORDERS, orderRecord);
 
+    const itemRecords = [];
+    const pieceRecords = [];
+
     for (const item of body.items) {
       const itemId = id("item");
       const itemType = normalizeText(item.item_type || "normal");
@@ -846,7 +871,7 @@ async function handleOrders(req, res) {
         measurement_photo_url: measurementPhotoUrl
       };
 
-      await appendRecord(SHEETS.ORDER_ITEMS, itemRecord);
+      itemRecords.push(itemRecord);
 
       const pieceNames = PIECE_EXPANSION[pieceType] || [pieceType];
       for (const pieceName of pieceNames) {
@@ -879,9 +904,12 @@ async function handleOrders(req, res) {
           updated_date: now
         };
 
-        await appendRecord(SHEETS.PIECES, pieceRecord);
+        pieceRecords.push(pieceRecord);
       }
     }
+
+    if (itemRecords.length) await appendRecords(SHEETS.ORDER_ITEMS, itemRecords);
+    if (pieceRecords.length) await appendRecords(SHEETS.PIECES, pieceRecords);
 
     sendOk(res, {
       message: "Order created",

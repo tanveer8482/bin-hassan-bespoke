@@ -1,4 +1,4 @@
-﻿const bcrypt = require("bcryptjs");
+const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { SHEETS } = require("./constants");
 const { getEnv } = require("./env");
@@ -85,7 +85,15 @@ function createToken(user) {
 }
 
 function parseAuthHeader(req) {
-  const auth = req.headers.authorization || "";
+  let auth = "";
+  if (req && req.headers) {
+    if (typeof req.headers.get === "function") {
+      auth = req.headers.get("authorization") || "";
+    } else {
+      auth = req.headers.authorization || "";
+    }
+  }
+
   if (!auth.startsWith("Bearer ")) {
     const error = new Error("Unauthorized");
     error.statusCode = 401;

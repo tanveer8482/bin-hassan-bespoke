@@ -1,4 +1,4 @@
-﻿let cache = null;
+let cache = null;
 
 function getEnv() {
   if (cache) return cache;
@@ -34,7 +34,8 @@ function getEnv() {
     cloudinaryApiSecret: process.env.CLOUDINARY_API_SECRET || "",
     skipVisionVerification:
       String(process.env.SKIP_VISION_VERIFICATION || "false").toLowerCase() ===
-      "true"
+      "true",
+    geminiApiKey: process.env.GEMINI_API_KEY || ""
   };
 
   return cache;
