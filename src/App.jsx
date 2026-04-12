@@ -352,6 +352,7 @@ export default function App() {
       window.localStorage.setItem(STORAGE_USER, JSON.stringify(result.user));
 
       await refreshSnapshot(result.token, { silent: true });
+      window.location.reload();
     } catch (loginError) {
       setError(loginError.message || "Login failed");
     } finally {
