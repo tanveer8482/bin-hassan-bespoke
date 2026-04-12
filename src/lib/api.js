@@ -7,23 +7,29 @@ async function request(path, options = {}) {
   const timeout = options.timeout || REQUEST_TIMEOUT_MS;
   const timer = window.setTimeout(() => controller.abort(), timeout);
 
+  // 1. Gather token from options or localStorage
   let requestToken = options.token;
   if (!requestToken && typeof window !== "undefined") {
     requestToken = window.localStorage.getItem("bhb_token") || "";
+  }
+  
+  // Clean up exact token
+  requestToken = typeof requestToken === "string" && requestToken !== "undefined" && requestToken !== "null" ? requestToken.trim() : "";
+
+  // 2. Build headers
+  const headersObj = {
+    "Content-Type": "application/json",
+    ...(options.headers || {})
+  };
+
+  if (requestToken) {
+    headersObj["Authorization"] = `Bearer ${requestToken}`;
   }
 
   try {
     const response = await fetch(`${API_BASE}${path}`, {
       method: options.method || "GET",
-      headers: {
-        "Content-Type": "application/json",
-        ...(requestToken
-          ? {
-              Authorization: `Bearer ${requestToken}`
-            }
-          : {}),
-        ...(options.headers || {})
-      },
+      headers: headersObj,
       body: options.body ? JSON.stringify(options.body) : undefined,
       signal: controller.signal
     });

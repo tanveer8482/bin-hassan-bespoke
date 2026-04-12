@@ -88,9 +88,18 @@ function parseAuthHeader(req) {
   let auth = "";
   if (req && req.headers) {
     if (typeof req.headers.get === "function") {
-      auth = req.headers.get("authorization") || "";
+      auth = req.headers.get("authorization") || req.headers.get("Authorization") || "";
     } else {
-      auth = req.headers.authorization || "";
+      auth = req.headers.authorization || req.headers.Authorization || "";
+      if (!auth) {
+        // Fallback: iterate over keys for case-insensitive match
+        for (const key in req.headers) {
+          if (key.toLowerCase() === "authorization") {
+            auth = req.headers[key];
+            break;
+          }
+        }
+      }
     }
   }
 
