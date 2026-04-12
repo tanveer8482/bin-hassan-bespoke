@@ -137,18 +137,26 @@ async function uploadToCloudinaryUnsigned(blob, fileName, folder = "") {
   const uploadPreset = CLOUDINARY_UNSIGNED_UPLOAD_PRESET;
 
   const formData = new FormData();
-  formData.append("file", blob, fileName || "upload.jpg");
+  // Unsigned upload: upload_preset must be first.
   formData.append("upload_preset", uploadPreset);
+  formData.append("file", blob, fileName || "upload.jpg");
   if (folder) {
     formData.append("folder", folder);
   }
 
-  // Unsigned upload must not send API key.
-  formData.delete("api_key");
+  // Unsigned upload payload must never include signed-upload fields.
+  const unsignedFields = [];
+  for (const [key, value] of formData.entries()) {
+    if (key === "file") continue;
+    unsignedFields.push({ key, value: String(value) });
+  }
 
   console.log(
     "[UPLOAD] Cloudinary unsigned request",
-    JSON.stringify({ endpoint, uploadPreset, folder: folder || "" })
+    JSON.stringify({
+      endpoint,
+      fields: unsignedFields
+    })
   );
 
   const response = await fetch(endpoint, {
@@ -391,3 +399,4 @@ export const api = {
   saveSettings: (token, body) =>
     request("/index?action=saveSettings", { method: "POST", token, body })
 };
+
