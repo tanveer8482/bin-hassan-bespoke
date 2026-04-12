@@ -8,9 +8,12 @@ export const USER_KEY = "bhb_user";
 export const MAX_UPLOAD_BYTES = 800 * 1024;
 
 const DEFAULT_MAX_IMAGE_DIMENSION = 1600;
-const CLOUDINARY_CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME || "";
-const CLOUDINARY_UNSIGNED_UPLOAD_PRESET =
-  import.meta.env.VITE_CLOUDINARY_UNSIGNED_UPLOAD_PRESET || "";
+const CLOUDINARY_CLOUD_NAME = (
+  import.meta.env.VITE_CLOUDINARY_CLOUD_NAME || ""
+).trim();
+const CLOUDINARY_UNSIGNED_UPLOAD_PRESET = (
+  import.meta.env.VITE_CLOUDINARY_UNSIGNED_UPLOAD_PRESET || ""
+).trim();
 
 function hasCloudinaryUnsignedConfig() {
   return Boolean(CLOUDINARY_CLOUD_NAME && CLOUDINARY_UNSIGNED_UPLOAD_PRESET);
@@ -131,12 +134,22 @@ export async function compressImageBeforeUpload(
 
 async function uploadToCloudinaryUnsigned(blob, fileName, folder = "") {
   const endpoint = `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`;
+  const uploadPreset = CLOUDINARY_UNSIGNED_UPLOAD_PRESET;
+
   const formData = new FormData();
   formData.append("file", blob, fileName || "upload.jpg");
-  formData.append("upload_preset", CLOUDINARY_UNSIGNED_UPLOAD_PRESET);
+  formData.append("upload_preset", uploadPreset);
   if (folder) {
     formData.append("folder", folder);
   }
+
+  // Unsigned upload must not send API key.
+  formData.delete("api_key");
+
+  console.log(
+    "[UPLOAD] Cloudinary unsigned request",
+    JSON.stringify({ endpoint, uploadPreset, folder: folder || "" })
+  );
 
   const response = await fetch(endpoint, {
     method: "POST",
