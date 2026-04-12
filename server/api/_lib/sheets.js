@@ -1,9 +1,12 @@
-﻿const { google } = require("googleapis");
+const { google } = require("googleapis");
 const { REQUIRED_HEADERS } = require("./constants");
 const { getEnv } = require("./env");
 
 let sheetsApiPromise = null;
 let schemaEnsured = false;
+let schemaEnsurePromise = null;
+const headerCache = new Map();
+const sheetIdCache = new Map();
 
 function toColumnLabel(columnIndex) {
   let label = "";
@@ -14,6 +17,38 @@ function toColumnLabel(columnIndex) {
     value = Math.floor((value - modulo) / 26);
   }
   return label;
+}
+
+function normalizeSheetTitle(range = "") {
+  const [rawTitle] = range.split("!");
+  if (!rawTitle) return "";
+  return rawTitle.replace(/^'/, "").replace(/'$/, "");
+}
+
+function mergeHeaders(existingHeaders = [], requiredHeaders = []) {
+  const merged = [...existingHeaders];
+  requiredHeaders.forEach((header) => {
+    if (!header) return;
+    if (!merged.includes(header)) merged.push(header);
+  });
+  return merged;
+}
+
+function hasSameHeaderOrder(a = [], b = []) {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+function cacheHeaders(tabName, headers = []) {
+  headerCache.set(tabName, [...headers]);
+}
+
+function getCachedHeaders(tabName) {
+  const headers = headerCache.get(tabName);
+  return headers ? [...headers] : null;
 }
 
 async function getSheetsApi() {
@@ -46,7 +81,19 @@ async function getSpreadsheetMeta() {
 }
 
 async function getSheetId(tabName) {
+  if (sheetIdCache.has(tabName)) {
+    return sheetIdCache.get(tabName);
+  }
+
   const meta = await getSpreadsheetMeta();
+  (meta.sheets || []).forEach((sheet) => {
+    const title = sheet.properties?.title;
+    const sheetId = sheet.properties?.sheetId;
+    if (title && sheetId !== undefined) {
+      sheetIdCache.set(title, sheetId);
+    }
+  });
+
   const target = (meta.sheets || []).find(
     (sheet) => sheet.properties?.title === tabName
   );
@@ -60,7 +107,16 @@ async function getSheetId(tabName) {
   return target.properties.sheetId;
 }
 
-async function ensureHeaders(tabName, headers) {
+async function ensureHeaders(tabName, headers = []) {
+  await ensureWorkbook();
+
+  const required = REQUIRED_HEADERS[tabName] || [];
+  const needed = [...new Set([...required, ...headers])];
+  const cached = getCachedHeaders(tabName);
+  if (cached && needed.every((header) => cached.includes(header))) {
+    return cached;
+  }
+
   const env = getEnv();
   const sheets = await getSheetsApi();
   const row1 = await sheets.spreadsheets.values.get({
@@ -69,13 +125,9 @@ async function ensureHeaders(tabName, headers) {
   });
 
   const existing = row1.data.values?.[0] || [];
-  const merged = [...existing];
+  const merged = mergeHeaders(existing, needed);
 
-  headers.forEach((header) => {
-    if (!merged.includes(header)) merged.push(header);
-  });
-
-  if (!existing.length || merged.length !== existing.length) {
+  if (!hasSameHeaderOrder(existing, merged)) {
     await sheets.spreadsheets.values.update({
       spreadsheetId: env.sheetsId,
       range: `${tabName}!A1`,
@@ -86,44 +138,100 @@ async function ensureHeaders(tabName, headers) {
     });
   }
 
+  cacheHeaders(tabName, merged);
   return merged;
 }
 
 async function ensureWorkbook() {
   if (schemaEnsured) return;
+  if (schemaEnsurePromise) return schemaEnsurePromise;
 
-  const env = getEnv();
-  const sheets = await getSheetsApi();
-  const meta = await getSpreadsheetMeta();
-  const existingTitles = new Set(
-    (meta.sheets || []).map((sheet) => sheet.properties?.title)
-  );
+  schemaEnsurePromise = (async () => {
+    const env = getEnv();
+    const sheets = await getSheetsApi();
+    const meta = await getSpreadsheetMeta();
+    const existingTitles = new Set(
+      (meta.sheets || []).map((sheet) => sheet.properties?.title)
+    );
 
-  const requests = [];
+    const addSheetRequests = [];
+    Object.keys(REQUIRED_HEADERS).forEach((tabName) => {
+      if (!existingTitles.has(tabName)) {
+        addSheetRequests.push({
+          addSheet: {
+            properties: { title: tabName }
+          }
+        });
+      }
+    });
 
-  Object.keys(REQUIRED_HEADERS).forEach((tabName) => {
-    if (!existingTitles.has(tabName)) {
-      requests.push({
-        addSheet: {
-          properties: { title: tabName }
+    if (addSheetRequests.length) {
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId: env.sheetsId,
+        requestBody: { requests: addSheetRequests }
+      });
+    }
+
+    const latestMeta = addSheetRequests.length ? await getSpreadsheetMeta() : meta;
+    (latestMeta.sheets || []).forEach((sheet) => {
+      const title = sheet.properties?.title;
+      const sheetId = sheet.properties?.sheetId;
+      if (title && sheetId !== undefined) {
+        sheetIdCache.set(title, sheetId);
+      }
+    });
+
+    const tabs = Object.keys(REQUIRED_HEADERS);
+    const headerRanges = tabs.map((tabName) => `${tabName}!1:1`);
+    const headerResult = await sheets.spreadsheets.values.batchGet({
+      spreadsheetId: env.sheetsId,
+      ranges: headerRanges
+    });
+
+    const valuesByTab = new Map();
+    (headerResult.data.valueRanges || []).forEach((valueRange) => {
+      const tabName = normalizeSheetTitle(valueRange.range || "");
+      const headers = valueRange.values?.[0] || [];
+      valuesByTab.set(tabName, headers);
+    });
+
+    const headerUpdates = [];
+    tabs.forEach((tabName) => {
+      const existing = valuesByTab.get(tabName) || [];
+      const required = REQUIRED_HEADERS[tabName] || [];
+      const merged = mergeHeaders(existing, required);
+
+      if (!hasSameHeaderOrder(existing, merged)) {
+        headerUpdates.push({
+          range: `${tabName}!A1`,
+          values: [merged]
+        });
+      }
+
+      cacheHeaders(tabName, merged);
+    });
+
+    if (headerUpdates.length) {
+      await sheets.spreadsheets.values.batchUpdate({
+        spreadsheetId: env.sheetsId,
+        requestBody: {
+          valueInputOption: "RAW",
+          data: headerUpdates
         }
       });
     }
-  });
 
-  if (requests.length) {
-    await sheets.spreadsheets.batchUpdate({
-      spreadsheetId: env.sheetsId,
-      requestBody: { requests }
+    schemaEnsured = true;
+  })()
+    .catch((error) => {
+      schemaEnsured = false;
+      throw error;
+    })
+    .finally(() => {
+      schemaEnsurePromise = null;
     });
-  }
 
-  const tabs = Object.keys(REQUIRED_HEADERS);
-  for (const tabName of tabs) {
-    await ensureHeaders(tabName, REQUIRED_HEADERS[tabName]);
-  }
-
-  schemaEnsured = true;
+  return schemaEnsurePromise;
 }
 
 function rowsToRecords(headers, rows, startingRow = 2) {
@@ -141,6 +249,14 @@ function recordToRow(headers, record) {
   return headers.map((header) => (record[header] ?? "").toString());
 }
 
+function recordsToAppendCells(headers, records) {
+  return records.map((record) => ({
+    values: recordToRow(headers, record).map((cellValue) => ({
+      userEnteredValue: { stringValue: cellValue }
+    }))
+  }));
+}
+
 async function getRows(tabName) {
   await ensureWorkbook();
   const env = getEnv();
@@ -151,8 +267,9 @@ async function getRows(tabName) {
   });
 
   const values = response.data.values || [];
-  const headers = values[0] || REQUIRED_HEADERS[tabName] || [];
+  const headers = values[0] || getCachedHeaders(tabName) || REQUIRED_HEADERS[tabName] || [];
   const rows = values.slice(1);
+  cacheHeaders(tabName, headers);
 
   return {
     headers,
@@ -167,21 +284,7 @@ async function getRecords(tabName) {
 }
 
 async function appendRecord(tabName, record) {
-  await ensureWorkbook();
-  const env = getEnv();
-  const sheets = await getSheetsApi();
-  const headers = await ensureHeaders(tabName, Object.keys(record));
-
-  await sheets.spreadsheets.values.append({
-    spreadsheetId: env.sheetsId,
-    range: `${tabName}!A:ZZ`,
-    valueInputOption: "USER_ENTERED",
-    insertDataOption: "INSERT_ROWS",
-    requestBody: {
-      values: [recordToRow(headers, record)]
-    }
-  });
-
+  await appendRecords(tabName, [record]);
   return record;
 }
 
@@ -191,7 +294,8 @@ async function appendRecords(tabName, records) {
 
   const env = getEnv();
   const sheets = await getSheetsApi();
-  const allKeys = [...new Set(records.flatMap((record) => Object.keys(record)))];
+  const required = REQUIRED_HEADERS[tabName] || [];
+  const allKeys = [...new Set([...required, ...records.flatMap((record) => Object.keys(record))])];
   const headers = await ensureHeaders(tabName, allKeys);
   const values = records.map((record) => recordToRow(headers, record));
 
@@ -201,6 +305,50 @@ async function appendRecords(tabName, records) {
     valueInputOption: "USER_ENTERED",
     insertDataOption: "INSERT_ROWS",
     requestBody: { values }
+  });
+}
+
+async function appendRecordsBatch(operations) {
+  const work = (operations || [])
+    .filter((entry) => entry && entry.tabName && Array.isArray(entry.records))
+    .map((entry) => ({
+      tabName: entry.tabName,
+      records: entry.records.filter(Boolean)
+    }))
+    .filter((entry) => entry.records.length > 0);
+
+  if (!work.length) return;
+  await ensureWorkbook();
+
+  const env = getEnv();
+  const sheets = await getSheetsApi();
+  const requests = [];
+
+  for (const entry of work) {
+    const required = REQUIRED_HEADERS[entry.tabName] || [];
+    const allKeys = [
+      ...new Set([
+        ...required,
+        ...entry.records.flatMap((record) => Object.keys(record))
+      ])
+    ];
+    const headers = await ensureHeaders(entry.tabName, allKeys);
+    const sheetId = await getSheetId(entry.tabName);
+
+    requests.push({
+      appendCells: {
+        sheetId,
+        rows: recordsToAppendCells(headers, entry.records),
+        fields: "userEnteredValue"
+      }
+    });
+  }
+
+  if (!requests.length) return;
+
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: env.sheetsId,
+    requestBody: { requests }
   });
 }
 
@@ -233,14 +381,30 @@ async function updateRecord(tabName, rowNumber, patch) {
 }
 
 async function updateByField(tabName, field, value, patch) {
-  const records = await getRecords(tabName);
+  await ensureWorkbook();
+  const env = getEnv();
+  const sheets = await getSheetsApi();
+  const { headers, records } = await getRows(tabName);
   const target = records.find((record) => record[field] === value);
   if (!target) {
     const error = new Error(`${tabName} record not found for ${field}=${value}`);
     error.statusCode = 404;
     throw error;
   }
-  return updateRecord(tabName, target.__rowNumber, patch);
+
+  const merged = { ...target, ...patch };
+  const lastColumn = toColumnLabel(headers.length);
+
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: env.sheetsId,
+    range: `${tabName}!A${target.__rowNumber}:${lastColumn}${target.__rowNumber}`,
+    valueInputOption: "USER_ENTERED",
+    requestBody: {
+      values: [recordToRow(headers, merged)]
+    }
+  });
+
+  return { ...merged, __rowNumber: target.__rowNumber };
 }
 
 async function updateMany(tabName, rows) {
@@ -306,6 +470,7 @@ async function deleteByField(tabName, field, value) {
 module.exports = {
   appendRecord,
   appendRecords,
+  appendRecordsBatch,
   deleteByField,
   deleteRecord,
   ensureWorkbook,

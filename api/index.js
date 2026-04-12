@@ -14,6 +14,7 @@ const { ensureMethod, sendOk } = require("../server/api/_lib/http");
 const {
   appendRecord,
   appendRecords,
+  appendRecordsBatch,
   ensureWorkbook,
   getRecords,
   updateByField
@@ -55,12 +56,8 @@ const DEFAULT_SETTINGS = [
 async function seedDefaults() {
   const settings = await getRecords(SHEETS.SETTINGS);
   const existingKeys = new Set(settings.map((row) => row.key));
-
-  for (const row of DEFAULT_SETTINGS) {
-    if (!existingKeys.has(row.key)) {
-      await appendRecord(SHEETS.SETTINGS, row);
-    }
-  }
+  const missing = DEFAULT_SETTINGS.filter((row) => !existingKeys.has(row.key));
+  if (missing.length) await appendRecords(SHEETS.SETTINGS, missing);
 }
 
 async function handleBootstrap(req, res) {
@@ -532,16 +529,19 @@ async function saveShopRates(req, res) {
 
   const body = await parseBody(req);
   requireFields(body, ["rates"]);
+  const records = (body.rates || []).map((rate) => ({
+    shop_id: rate.shop_id,
+    piece_name: rate.piece_name,
+    item_type: rate.item_type,
+    rate: toNumber(rate.rate)
+  }));
 
-  for (const rate of body.rates) {
-    const record = {
-      shop_id: rate.shop_id,
-      piece_name: rate.piece_name,
-      item_type: rate.item_type,
-      rate: toNumber(rate.rate)
-    };
-    await appendRecord(SHEETS.SHOP_RATES, record);
-  }
+  await appendRecordsBatch([
+    {
+      tabName: SHEETS.SHOP_RATES,
+      records
+    }
+  ]);
 
   sendOk(res, {
     message: "Shop rates saved"
@@ -574,16 +574,19 @@ async function saveKarigarRates(req, res) {
 
   const body = await parseBody(req);
   requireFields(body, ["rates"]);
+  const records = (body.rates || []).map((rate) => ({
+    karigar_id: rate.karigar_id,
+    piece_name: rate.piece_name,
+    item_type: rate.item_type,
+    rate: toNumber(rate.rate)
+  }));
 
-  for (const rate of body.rates) {
-    const record = {
-      karigar_id: rate.karigar_id,
-      piece_name: rate.piece_name,
-      item_type: rate.item_type,
-      rate: toNumber(rate.rate)
-    };
-    await appendRecord(SHEETS.KARIGAR_RATES, record);
-  }
+  await appendRecordsBatch([
+    {
+      tabName: SHEETS.KARIGAR_RATES,
+      records
+    }
+  ]);
 
   sendOk(res, {
     message: "Karigar rates saved"
@@ -895,8 +898,6 @@ async function handleOrders(req, res) {
       updated_date: now
     };
 
-    await appendRecord(SHEETS.ORDERS, orderRecord);
-
     const itemRecords = [];
     const pieceRecords = [];
 
@@ -953,8 +954,20 @@ async function handleOrders(req, res) {
       }
     }
 
-    if (itemRecords.length) await appendRecords(SHEETS.ORDER_ITEMS, itemRecords);
-    if (pieceRecords.length) await appendRecords(SHEETS.PIECES, pieceRecords);
+    await appendRecordsBatch([
+      {
+        tabName: SHEETS.ORDERS,
+        records: [orderRecord]
+      },
+      {
+        tabName: SHEETS.ORDER_ITEMS,
+        records: itemRecords
+      },
+      {
+        tabName: SHEETS.PIECES,
+        records: pieceRecords
+      }
+    ]);
 
     sendOk(res, {
       message: "Order created",
