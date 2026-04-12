@@ -7,13 +7,22 @@ function getEnv() {
     "GOOGLE_SHEETS_ID",
     "GOOGLE_SERVICE_ACCOUNT_EMAIL",
     "GOOGLE_PRIVATE_KEY",
-    "MY_ADMIN_KEY"
+    "JWT_SECRET"
   ];
 
   const missing = required.filter((key) => !process.env[key]);
   if (missing.length) {
     const error = new Error(
       `Missing environment variables: ${missing.join(", ")}`
+    );
+    error.statusCode = 500;
+    throw error;
+  }
+
+  const expectedJwtSecret = "BinHassanBespokeSecret2026";
+  if (process.env.JWT_SECRET !== expectedJwtSecret) {
+    const error = new Error(
+      "Invalid JWT_SECRET value. Expected: BinHassanBespokeSecret2026"
     );
     error.statusCode = 500;
     throw error;
@@ -26,7 +35,7 @@ function getEnv() {
       .replace(/\\n/g, "\n")
       .replace(/\"/g, ""),
     jwtSecret: process.env.JWT_SECRET || "BinHassanBespokeSecret2026",
-    myAdminKey: process.env.MY_ADMIN_KEY,
+    myAdminKey: process.env.MY_ADMIN_KEY || process.env.JWT_SECRET,
     pollIntervalMs: Number(process.env.POLL_INTERVAL_MS || 20000),
     cloudinaryCloudName: process.env.CLOUDINARY_CLOUD_NAME || "",
     cloudinaryApiKey: process.env.CLOUDINARY_API_KEY || "",

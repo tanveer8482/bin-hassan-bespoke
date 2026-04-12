@@ -660,6 +660,7 @@ async function markPieceCut(req, res) {
 
   const body = await parseBody(req);
   requireFields(body, ["piece_id", "photo_data_url"]);
+  console.log("[CUT] markPieceCut requested by:", user.username, "piece_id:", body.piece_id);
 
   const allPieces = await getRecords(SHEETS.PIECES);
   const piece = allPieces.find(p => p.piece_id === body.piece_id);
@@ -1207,6 +1208,7 @@ module.exports = async function (req, res) {
 
   const url = new URL(req.url || "/", "http://localhost");
   const action = url.searchParams.get("action");
+  console.log("[API ROUTER]", req.method, "action:", action, "url:", req.url);
 
   if (!action || !handlers[action]) {
     console.error("[API ROUTER] Unknown action", action, req.method, req.url);

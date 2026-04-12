@@ -56,7 +56,28 @@ async function authenticate(username, password) {
     throw error;
   }
 
-  const isMatch = String(password || "") === String(user.password || "");
+  const providedPassword = String(password || "");
+  const storedPassword = String(user.password || "");
+
+  let isMatch = false;
+  const looksHashed =
+    storedPassword.startsWith("$2a$") ||
+    storedPassword.startsWith("$2b$") ||
+    storedPassword.startsWith("$2y$");
+
+  if (looksHashed) {
+    try {
+      isMatch = await bcrypt.compare(providedPassword, storedPassword);
+    } catch {
+      isMatch = false;
+    }
+  }
+
+  if (!isMatch) {
+    // Backward-compatible fallback for legacy plain-text rows.
+    isMatch = providedPassword === storedPassword;
+  }
+
   if (!isMatch) {
     const error = new Error("Invalid username or password");
     error.statusCode = 401;
@@ -86,14 +107,15 @@ function createToken(user) {
 
 function parseAuthHeader(req) {
   let auth = "";
+  let tokenSource = "none";
 
   // 1. Prioritize Query String Token (as requested for fallback)
   if (req.url) {
     try {
       const url = new URL(req.url, "http://localhost");
       const queryToken = url.searchParams.get("token");
-      if (queryToken) {
-        console.log("Found token in query string");
+      if (queryToken && queryToken !== "undefined" && queryToken !== "null") {
+        tokenSource = "query";
         auth = queryToken;
       }
     } catch (e) {
@@ -129,6 +151,7 @@ function parseAuthHeader(req) {
         }
       }
     }
+    if (auth) tokenSource = "header";
   }
 
   if (!auth) {
@@ -144,6 +167,7 @@ function parseAuthHeader(req) {
     auth = auth.replace(bearerRegex, "").trim();
   }
 
+  console.log("[AUTH] Token parsed from:", tokenSource);
   return auth;
 }
 
@@ -159,13 +183,24 @@ function requireAuth(req) {
   }
 }
 
-function requireRole(req, roles) {
-  const user = requireAuth(req);
+function isDecodedUser(candidate) {
+  return (
+    !!candidate &&
+    typeof candidate === "object" &&
+    typeof candidate.username === "string" &&
+    typeof candidate.role === "string" &&
+    !candidate.headers
+  );
+}
+
+function requireRole(reqOrUser, roles) {
+  const user = isDecodedUser(reqOrUser) ? reqOrUser : requireAuth(reqOrUser);
   if (!roles.includes(user.role)) {
     const error = new Error("Forbidden");
     error.statusCode = 403;
     throw error;
   }
+  console.log("[AUTH] Role check passed:", user.role, "allowed:", roles.join(","));
   return user;
 }
 

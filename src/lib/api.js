@@ -1,6 +1,9 @@
-const API_BASE = "/api";
+﻿const API_BASE = "/api";
 
 const REQUEST_TIMEOUT_MS = 10000;
+
+export const TOKEN_KEY = "bhb_token";
+export const USER_KEY = "bhb_user";
 
 export async function request(path, options = {}) {
   const controller = new AbortController();
@@ -9,19 +12,18 @@ export async function request(path, options = {}) {
 
   // 1. Gather token from options or localStorage with strict validation
   let requestToken = options.token;
-  
-  // If token is missing, or is a useless string representation, try localStorage
-  const isInvalidToken = !requestToken || 
-                        requestToken === "undefined" || 
-                        requestToken === "null" || 
-                        (typeof requestToken === "string" && requestToken.trim() === "");
+
+  const isInvalidToken =
+    !requestToken ||
+    requestToken === "undefined" ||
+    requestToken === "null" ||
+    (typeof requestToken === "string" && requestToken.trim() === "");
 
   if (isInvalidToken && typeof window !== "undefined") {
-    requestToken = window.localStorage.getItem("bhb_token") || "";
+    requestToken = window.localStorage.getItem(TOKEN_KEY) || "";
   }
-  
-  // Final cleanup: ensure it's a trimmed string, or empty
-  requestToken = (typeof requestToken === "string") ? requestToken.trim() : "";
+
+  requestToken = typeof requestToken === "string" ? requestToken.trim() : "";
   if (requestToken === "undefined" || requestToken === "null") requestToken = "";
 
   // 2. Build headers
@@ -30,14 +32,26 @@ export async function request(path, options = {}) {
     ...(options.headers || {})
   };
 
-  // Force Authorization header if we have any semblance of a token
+  // Double-lock part 1: Authorization header
   if (requestToken) {
-    headersObj["Authorization"] = `Bearer ${requestToken}`;
+    headersObj.Authorization = `Bearer ${requestToken}`;
   }
 
+  // Double-lock part 2: token query parameter
+  let finalPath = path;
+  if (requestToken && !/[?&]token=/.test(path)) {
+    const divider = path.includes("?") ? "&" : "?";
+    finalPath = `${path}${divider}token=${encodeURIComponent(requestToken)}`;
+  }
+
+  const method = options.method || "GET";
+  const requestUrl = `${API_BASE}${finalPath}`;
+  const tokenPrefix = requestToken ? `${requestToken.slice(0, 12)}...` : "none";
+  console.log(`[API] ${method} ${requestUrl} tokenPrefix=${tokenPrefix}`);
+
   try {
-    const response = await fetch(`${API_BASE}${path}`, {
-      method: options.method || "GET",
+    const response = await fetch(requestUrl, {
+      method,
       headers: headersObj,
       body: options.body ? JSON.stringify(options.body) : undefined,
       signal: controller.signal
@@ -66,18 +80,14 @@ export async function request(path, options = {}) {
   }
 }
 
-export const TOKEN_KEY = "bhb_token";
-export const USER_KEY = "bhb_user";
-
 export const api = {
-  // All API calls now use the consolidated /api/index?action=... endpoint
+  // All API calls use the consolidated /api/index?action=... endpoint
   login: async (body) => {
     const res = await request("/index?action=login", { method: "POST", body });
     if (res && res.token && typeof window !== "undefined") {
       console.log("Saving token to localStorage:", TOKEN_KEY);
       window.localStorage.setItem(TOKEN_KEY, res.token);
-      
-      // Verify immediately
+
       const saved = window.localStorage.getItem(TOKEN_KEY);
       console.log("Verified token in localStorage:", saved ? "EXISTS" : "MISSING");
 
@@ -92,8 +102,10 @@ export const api = {
   bootstrap: (body) => request("/index?action=bootstrap", { method: "POST", body }),
 
   listOrders: (token) => request("/index?action=listOrders", { token }),
-  createOrder: (token, body) => request("/index?action=createOrder", { method: "POST", token, body }),
-  updateOrder: (token, body) => request("/index?action=updateOrder", { method: "PATCH", token, body }),
+  createOrder: (token, body) =>
+    request("/index?action=createOrder", { method: "POST", token, body }),
+  updateOrder: (token, body) =>
+    request("/index?action=updateOrder", { method: "PATCH", token, body }),
 
   markPieceCut: (token, body) =>
     request("/index?action=markPieceCut", { method: "POST", token, body }),
@@ -103,12 +115,16 @@ export const api = {
     request("/index?action=completePiece", { method: "POST", token, body }),
 
   listShops: (token) => request("/index?action=listShops", { token }),
-  createShop: (token, body) => request("/index?action=createShop", { method: "POST", token, body }),
-  updateShop: (token, body) => request("/index?action=updateShop", { method: "PATCH", token, body }),
+  createShop: (token, body) =>
+    request("/index?action=createShop", { method: "POST", token, body }),
+  updateShop: (token, body) =>
+    request("/index?action=updateShop", { method: "PATCH", token, body }),
 
   listKarigar: (token) => request("/index?action=listKarigar", { token }),
-  createKarigar: (token, body) => request("/index?action=createKarigar", { method: "POST", token, body }),
-  updateKarigar: (token, body) => request("/index?action=updateKarigar", { method: "PATCH", token, body }),
+  createKarigar: (token, body) =>
+    request("/index?action=createKarigar", { method: "POST", token, body }),
+  updateKarigar: (token, body) =>
+    request("/index?action=updateKarigar", { method: "PATCH", token, body }),
 
   listShopRates: (token) => request("/index?action=listShopRates", { token }),
   saveShopRates: (token, body) =>
@@ -122,15 +138,20 @@ export const api = {
   createShopPayment: (token, body) =>
     request("/index?action=createShopPayment", { method: "POST", token, body }),
 
-  listKarigarPayments: (token) => request("/index?action=listKarigarPayments", { token }),
+  listKarigarPayments: (token) =>
+    request("/index?action=listKarigarPayments", { token }),
   createKarigarPayment: (token, body) =>
     request("/index?action=createKarigarPayment", { method: "POST", token, body }),
 
   listUsers: (token) => request("/index?action=listUsers", { token }),
-  createUser: (token, body) => request("/index?action=createUser", { method: "POST", token, body }),
-  updateUser: (token, body) => request("/index?action=updateUser", { method: "PATCH", token, body }),
-  deleteUser: (token, body) => request("/index?action=deleteUser", { method: "DELETE", token, body }),
+  createUser: (token, body) =>
+    request("/index?action=createUser", { method: "POST", token, body }),
+  updateUser: (token, body) =>
+    request("/index?action=updateUser", { method: "PATCH", token, body }),
+  deleteUser: (token, body) =>
+    request("/index?action=deleteUser", { method: "DELETE", token, body }),
 
   listSettings: (token) => request("/index?action=listSettings", { token }),
-  saveSettings: (token, body) => request("/index?action=saveSettings", { method: "POST", token, body })
+  saveSettings: (token, body) =>
+    request("/index?action=saveSettings", { method: "POST", token, body })
 };

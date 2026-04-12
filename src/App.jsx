@@ -1,6 +1,6 @@
-
+﻿
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api, request, TOKEN_KEY, USER_KEY } from "./lib/api";
+import { api, TOKEN_KEY, USER_KEY } from "./lib/api";
 import { emptySnapshot } from "./lib/emptySnapshot";
 import { SyncBar } from "./components/SyncBar";
 import { AdminApp } from "./features/admin/AdminApp";
@@ -187,7 +187,7 @@ export default function App() {
           const me = await api.getMe(token);
           if (!active) return;
           setUser(me.user);
-          window.localStorage.setItem(STORAGE_USER, JSON.stringify(me.user));
+          window.localStorage.setItem(USER_KEY, JSON.stringify(me.user));
         } catch {
           logout();
           return;
@@ -248,8 +248,7 @@ export default function App() {
           payload.status === "delivered" ? `deliver:${payload.order_id}` : "updateOrder",
           async () => {
             const currentToken = window.localStorage.getItem(TOKEN_KEY) || token;
-            // Use api wrapper but add redundant query param for status updates
-            return api.updateOrder(currentToken, { ...payload, token: currentToken });
+            return api.updateOrder(currentToken, payload);
           },
           "Order updated"
         ),
@@ -260,31 +259,16 @@ export default function App() {
             const currentToken = window.localStorage.getItem(TOKEN_KEY) || "";
             console.log("MARK_PIECE_CUT ATTEMPT - Token found in localStorage:", currentToken ? "YES" : "NO");
             console.log("Token value prefix:", currentToken ? currentToken.substring(0, 10) + "..." : "NONE");
-            
-            const response = await fetch(`/api/index?action=markPieceCut&token=${currentToken}`, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${currentToken}`
-              },
-              body: JSON.stringify(payload)
-            });
-            
-            const result = await response.json().catch(() => ({}));
-            if (!response.ok || result.ok === false) {
-              throw new Error(result.message || "Cutting upload failed");
-            }
-            return result;
+            return api.markPieceCut(currentToken, payload);
           },
           "Piece marked cut"
         ),
-       assignPiece: (payload) =>
+      assignPiece: (payload) =>
         runAction(
           `assign:${payload.piece_id}`,
           async () => {
-             const currentToken = window.localStorage.getItem(TOKEN_KEY) || token;
-             // Add redundant query param
-             return request(`/index?action=assignPiece&token=${currentToken}`, { method: "POST", token: currentToken, body: payload });
+            const currentToken = window.localStorage.getItem(TOKEN_KEY) || token;
+            return api.assignPiece(currentToken, payload);
           },
           "Work assigned"
         ),
@@ -292,9 +276,8 @@ export default function App() {
         runAction(
           `complete:${payload.piece_id}`,
           async () => {
-             const currentToken = window.localStorage.getItem(TOKEN_KEY) || token;
-             // Add redundant query param
-             return request(`/index?action=completePiece&token=${currentToken}`, { method: "POST", token: currentToken, body: payload });
+            const currentToken = window.localStorage.getItem(TOKEN_KEY) || token;
+            return api.completePiece(currentToken, payload);
           },
           "Piece completed"
         ),
@@ -425,6 +408,7 @@ export default function App() {
     </div>
   );
 }
+
 
 
 
