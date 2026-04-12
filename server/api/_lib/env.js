@@ -7,7 +7,6 @@ function getEnv() {
     "GOOGLE_SHEETS_ID",
     "GOOGLE_SERVICE_ACCOUNT_EMAIL",
     "GOOGLE_PRIVATE_KEY",
-    "JWT_SECRET",
     "MY_ADMIN_KEY"
   ];
 
@@ -26,7 +25,7 @@ function getEnv() {
     privateKey: process.env.GOOGLE_PRIVATE_KEY
       .replace(/\\n/g, "\n")
       .replace(/\"/g, ""),
-    jwtSecret: process.env.JWT_SECRET,
+    jwtSecret: process.env.JWT_SECRET || "BinHassanBespokeSecret2026",
     myAdminKey: process.env.MY_ADMIN_KEY,
     pollIntervalMs: Number(process.env.POLL_INTERVAL_MS || 20000),
     cloudinaryCloudName: process.env.CLOUDINARY_CLOUD_NAME || "",
