@@ -66,14 +66,23 @@ async function request(path, options = {}) {
   }
 }
 
+export const TOKEN_KEY = "bhb_token";
+export const USER_KEY = "bhb_user";
+
 export const api = {
   // All API calls now use the consolidated /api/index?action=... endpoint
   login: async (body) => {
     const res = await request("/index?action=login", { method: "POST", body });
     if (res && res.token && typeof window !== "undefined") {
-      window.localStorage.setItem("bhb_token", res.token);
+      console.log("Saving token to localStorage:", TOKEN_KEY);
+      window.localStorage.setItem(TOKEN_KEY, res.token);
+      
+      // Verify immediately
+      const saved = window.localStorage.getItem(TOKEN_KEY);
+      console.log("Verified token in localStorage:", saved ? "EXISTS" : "MISSING");
+
       if (res.user) {
-        window.localStorage.setItem("bhb_user", JSON.stringify(res.user));
+        window.localStorage.setItem(USER_KEY, JSON.stringify(res.user));
       }
     }
     return res;

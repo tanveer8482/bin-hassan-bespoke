@@ -1,6 +1,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api } from "./lib/api";
+import { api, TOKEN_KEY, USER_KEY } from "./lib/api";
 import { emptySnapshot } from "./lib/emptySnapshot";
 import { SyncBar } from "./components/SyncBar";
 import { AdminApp } from "./features/admin/AdminApp";
@@ -8,8 +8,6 @@ import { KarigarApp } from "./features/karigar/KarigarApp";
 import { ShopApp } from "./features/shop/ShopApp";
 import { CuttingApp } from "./features/cutting/CuttingApp";
 
-const STORAGE_TOKEN = "bhb_token";
-const STORAGE_USER = "bhb_user";
 const DEFAULT_POLL_MS = 20000;
 
 function getStoredJson(key, fallback) {
@@ -78,8 +76,8 @@ function LoginScreen({ onLogin, loading, error }) {
 }
 
 export default function App() {
-  const [token, setToken] = useState(() => window.localStorage.getItem(STORAGE_TOKEN) || "");
-  const [user, setUser] = useState(() => getStoredJson(STORAGE_USER, null));
+  const [token, setToken] = useState(() => window.localStorage.getItem(TOKEN_KEY) || "");
+  const [user, setUser] = useState(() => getStoredJson(USER_KEY, null));
 
   const [data, setData] = useState(emptySnapshot());
   const [settings, setSettings] = useState([]);
@@ -129,8 +127,8 @@ export default function App() {
     setNotice("");
     setLastSynced("");
 
-    window.localStorage.removeItem(STORAGE_TOKEN);
-    window.localStorage.removeItem(STORAGE_USER);
+    window.localStorage.removeItem(TOKEN_KEY);
+    window.localStorage.removeItem(USER_KEY);
   }, []);
 
   const refreshSnapshot = useCallback(
@@ -255,14 +253,15 @@ export default function App() {
         runAction(
           `cut:${payload.piece_id}`,
           async () => {
-            const token = window.localStorage.getItem("bhb_token") || "";
-            console.log("Sending token:", token);
+            const currentToken = window.localStorage.getItem(TOKEN_KEY) || "";
+            console.log("MARK_PIECE_CUT ATTEMPT - Token found in localStorage:", currentToken ? "YES" : "NO");
+            console.log("Token value prefix:", currentToken ? currentToken.substring(0, 10) + "..." : "NONE");
             
-            const response = await fetch(`/api/index?action=markPieceCut&token=${token}`, {
+            const response = await fetch(`/api/index?action=markPieceCut&token=${currentToken}`, {
               method: "POST",
               headers: {
                 "Content-Type": "application/json",
-                "Authorization": `Bearer ${token}`
+                "Authorization": `Bearer ${currentToken}`
               },
               body: JSON.stringify(payload)
             });
@@ -348,8 +347,8 @@ export default function App() {
       setPollIntervalMs(result.poll_interval_ms || DEFAULT_POLL_MS);
       setLastSynced(result.last_synced || "");
 
-      window.localStorage.setItem(STORAGE_TOKEN, result.token);
-      window.localStorage.setItem(STORAGE_USER, JSON.stringify(result.user));
+      window.localStorage.setItem(TOKEN_KEY, result.token);
+      window.localStorage.setItem(USER_KEY, JSON.stringify(result.user));
 
       await refreshSnapshot(result.token, { silent: true });
       window.location.reload();
