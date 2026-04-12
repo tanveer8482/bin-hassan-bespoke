@@ -258,7 +258,7 @@ export default function App() {
             const token = window.localStorage.getItem("bhb_token") || "";
             console.log("Sending token:", token);
             
-            const response = await fetch("/api/index?action=markPieceCut", {
+            const response = await fetch(`/api/index?action=markPieceCut&token=${token}`, {
               method: "POST",
               headers: {
                 "Content-Type": "application/json",

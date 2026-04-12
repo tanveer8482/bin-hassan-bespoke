@@ -87,6 +87,19 @@ function createToken(user) {
 function parseAuthHeader(req) {
   let auth = "";
   if (req && req.headers) {
+    // 2. Debug Header Logging (as requested)
+    try {
+      if (typeof req.headers.get === "function") {
+        const headersJson = {};
+        req.headers.forEach((v, k) => { headersJson[k] = v; });
+        console.log("Incoming Headers (Native):", JSON.stringify(headersJson));
+      } else {
+        console.log("Incoming Headers (Plain):", JSON.stringify(req.headers));
+      }
+    } catch (e) {
+      console.log("Logging failed", e.message);
+    }
+
     if (typeof req.headers.get === "function") {
       auth = req.headers.get("authorization") || req.headers.get("Authorization") || "";
     } else {
@@ -100,6 +113,17 @@ function parseAuthHeader(req) {
           }
         }
       }
+    }
+  }
+
+  // 3. Fallback Auth: Check query string if header is missing
+  if (!auth && req.url) {
+    try {
+      const url = new URL(req.url, "http://localhost");
+      auth = url.searchParams.get("token") || "";
+      if (auth) console.log("Found token in query string");
+    } catch (e) {
+      // Ignore URL parsing errors
     }
   }
 
