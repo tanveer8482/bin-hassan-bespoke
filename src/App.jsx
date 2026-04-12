@@ -1,4 +1,4 @@
-﻿
+
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "./lib/api";
 import { emptySnapshot } from "./lib/emptySnapshot";
@@ -254,7 +254,25 @@ export default function App() {
       markPieceCut: (payload) =>
         runAction(
           `cut:${payload.piece_id}`,
-          () => api.markPieceCut(token, payload),
+          async () => {
+            const token = window.localStorage.getItem("bhb_token") || "";
+            console.log("Sending token:", token);
+            
+            const response = await fetch("/api/index?action=markPieceCut", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${token}`
+              },
+              body: JSON.stringify(payload)
+            });
+            
+            const result = await response.json().catch(() => ({}));
+            if (!response.ok || result.ok === false) {
+              throw new Error(result.message || "Cutting upload failed");
+            }
+            return result;
+          },
           "Piece marked cut"
         ),
       assignPiece: (payload) =>

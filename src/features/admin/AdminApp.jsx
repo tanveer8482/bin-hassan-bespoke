@@ -1,4 +1,4 @@
-﻿
+
 import { useMemo, useState, useCallback } from "react";
 import { StatusBadge } from "../../components/StatusBadge";
 import {
@@ -415,12 +415,15 @@ export function AdminApp({ data, actions, busyAction }) {
     if (!file) return;
 
     try {
+      const token = window.localStorage.getItem("bhb_token");
+      console.log("Sending token:", token);
       const dataUrl = await compressImageFile(file, 1024, 300);
       await actions.markPieceCut({
         piece_id: pieceId,
         photo_data_url: dataUrl
       });
-    } catch {
+    } catch (err) {
+      console.error("Cutting upload failed:", err);
       // Ignore local read errors; app-level error toast handles API issues.
     }
   };
