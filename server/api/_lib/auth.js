@@ -86,15 +86,31 @@ function createToken(user) {
 
 function parseAuthHeader(req) {
   let auth = "";
-  if (req && req.headers) {
-    // 2. Debug Header Logging (as requested)
+
+  // 1. Prioritize Query String Token (as requested for fallback)
+  if (req.url) {
+    try {
+      const url = new URL(req.url, "http://localhost");
+      const queryToken = url.searchParams.get("token");
+      if (queryToken) {
+        console.log("Found token in query string");
+        auth = queryToken;
+      }
+    } catch (e) {
+      // Ignore URL parsing errors
+    }
+  }
+
+  // 2. Fallback to Authorization Header
+  if (!auth && req && req.headers) {
+    // Debug Header Logging
     try {
       if (typeof req.headers.get === "function") {
         const headersJson = {};
         req.headers.forEach((v, k) => { headersJson[k] = v; });
-        console.log("Incoming Headers (Native):", JSON.stringify(headersJson));
+        console.log("Incoming Headers:", JSON.stringify(headersJson));
       } else {
-        console.log("Incoming Headers (Plain):", JSON.stringify(req.headers));
+        console.log("Incoming Headers:", JSON.stringify(req.headers));
       }
     } catch (e) {
       console.log("Logging failed", e.message);
@@ -105,7 +121,6 @@ function parseAuthHeader(req) {
     } else {
       auth = req.headers.authorization || req.headers.Authorization || "";
       if (!auth) {
-        // Fallback: iterate over keys for case-insensitive match
         for (const key in req.headers) {
           if (key.toLowerCase() === "authorization") {
             auth = req.headers[key];
@@ -116,26 +131,17 @@ function parseAuthHeader(req) {
     }
   }
 
-  // 3. Fallback Auth: Check query string if header is missing
-  if (!auth && req.url) {
-    try {
-      const url = new URL(req.url, "http://localhost");
-      auth = url.searchParams.get("token") || "";
-      if (auth) console.log("Found token in query string");
-    } catch (e) {
-      // Ignore URL parsing errors
-    }
-  }
-
   if (!auth) {
     const error = new Error("Unauthorized: No token provided");
     error.statusCode = 401;
     throw error;
   }
 
+  // 3. Robust Bearer Splitting
   auth = auth.trim();
-  if (auth.toLowerCase().startsWith("bearer ")) {
-    auth = auth.substring(7).trim();
+  const bearerRegex = /^bearer\s+/i;
+  if (bearerRegex.test(auth)) {
+    auth = auth.replace(bearerRegex, "").trim();
   }
 
   return auth;

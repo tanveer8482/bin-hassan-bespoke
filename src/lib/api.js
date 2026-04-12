@@ -2,7 +2,7 @@ const API_BASE = "/api";
 
 const REQUEST_TIMEOUT_MS = 10000;
 
-async function request(path, options = {}) {
+export async function request(path, options = {}) {
   const controller = new AbortController();
   const timeout = options.timeout || REQUEST_TIMEOUT_MS;
   const timer = window.setTimeout(() => controller.abort(), timeout);

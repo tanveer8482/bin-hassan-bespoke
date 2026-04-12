@@ -1,6 +1,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api, TOKEN_KEY, USER_KEY } from "./lib/api";
+import { api, request, TOKEN_KEY, USER_KEY } from "./lib/api";
 import { emptySnapshot } from "./lib/emptySnapshot";
 import { SyncBar } from "./components/SyncBar";
 import { AdminApp } from "./features/admin/AdminApp";
@@ -246,7 +246,11 @@ export default function App() {
       updateOrder: (payload) =>
         runAction(
           payload.status === "delivered" ? `deliver:${payload.order_id}` : "updateOrder",
-          () => api.updateOrder(token, payload),
+          async () => {
+            const currentToken = window.localStorage.getItem(TOKEN_KEY) || token;
+            // Use api wrapper but add redundant query param for status updates
+            return api.updateOrder(currentToken, { ...payload, token: currentToken });
+          },
           "Order updated"
         ),
       markPieceCut: (payload) =>
@@ -274,16 +278,24 @@ export default function App() {
           },
           "Piece marked cut"
         ),
-      assignPiece: (payload) =>
+       assignPiece: (payload) =>
         runAction(
           `assign:${payload.piece_id}`,
-          () => api.assignPiece(token, payload),
+          async () => {
+             const currentToken = window.localStorage.getItem(TOKEN_KEY) || token;
+             // Add redundant query param
+             return request(`/index?action=assignPiece&token=${currentToken}`, { method: "POST", token: currentToken, body: payload });
+          },
           "Work assigned"
         ),
       completePiece: (payload) =>
         runAction(
           `complete:${payload.piece_id}`,
-          () => api.completePiece(token, payload),
+          async () => {
+             const currentToken = window.localStorage.getItem(TOKEN_KEY) || token;
+             // Add redundant query param
+             return request(`/index?action=completePiece&token=${currentToken}`, { method: "POST", token: currentToken, body: payload });
+          },
           "Piece completed"
         ),
 
