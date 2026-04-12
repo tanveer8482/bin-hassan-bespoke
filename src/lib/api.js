@@ -7,14 +7,22 @@ async function request(path, options = {}) {
   const timeout = options.timeout || REQUEST_TIMEOUT_MS;
   const timer = window.setTimeout(() => controller.abort(), timeout);
 
-  // 1. Gather token from options or localStorage
+  // 1. Gather token from options or localStorage with strict validation
   let requestToken = options.token;
-  if (!requestToken && typeof window !== "undefined") {
+  
+  // If token is missing, or is a useless string representation, try localStorage
+  const isInvalidToken = !requestToken || 
+                        requestToken === "undefined" || 
+                        requestToken === "null" || 
+                        (typeof requestToken === "string" && requestToken.trim() === "");
+
+  if (isInvalidToken && typeof window !== "undefined") {
     requestToken = window.localStorage.getItem("bhb_token") || "";
   }
   
-  // Clean up exact token
-  requestToken = typeof requestToken === "string" && requestToken !== "undefined" && requestToken !== "null" ? requestToken.trim() : "";
+  // Final cleanup: ensure it's a trimmed string, or empty
+  requestToken = (typeof requestToken === "string") ? requestToken.trim() : "";
+  if (requestToken === "undefined" || requestToken === "null") requestToken = "";
 
   // 2. Build headers
   const headersObj = {
@@ -22,6 +30,7 @@ async function request(path, options = {}) {
     ...(options.headers || {})
   };
 
+  // Force Authorization header if we have any semblance of a token
   if (requestToken) {
     headersObj["Authorization"] = `Bearer ${requestToken}`;
   }
