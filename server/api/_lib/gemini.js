@@ -1,7 +1,51 @@
 const { getEnv } = require("./env");
 const { normalizeKey } = require("./utils");
 
-async function verifyWithGemini(referenceUrl, cuttingDataUrl) {
+function parseDataUrl(dataUrl) {
+  const match = String(dataUrl || "").match(/^data:(.+);base64,(.+)$/);
+  if (!match) {
+    const error = new Error("Invalid image data URL format.");
+    error.statusCode = 400;
+    throw error;
+  }
+  return {
+    mimeType: match[1],
+    base64: match[2]
+  };
+}
+
+async function imageInputToBase64(imageInput) {
+  const value = String(imageInput || "").trim();
+  if (!value) {
+    const error = new Error("Image input is required for verification.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (value.startsWith("data:")) {
+    return parseDataUrl(value);
+  }
+
+  if (/^https?:\/\//i.test(value)) {
+    const response = await fetch(value);
+    if (!response.ok) {
+      const error = new Error("Failed to fetch uploaded image for verification.");
+      error.statusCode = 400;
+      throw error;
+    }
+    const arrayBuffer = await response.arrayBuffer();
+    return {
+      mimeType: response.headers.get("content-type") || "image/jpeg",
+      base64: Buffer.from(arrayBuffer).toString("base64")
+    };
+  }
+
+  const error = new Error("Unsupported image input format for verification.");
+  error.statusCode = 400;
+  throw error;
+}
+
+async function verifyWithGemini(referenceUrl, cuttingImageInput) {
   const env = getEnv();
 
   if (env.skipVisionVerification) {
@@ -14,7 +58,7 @@ async function verifyWithGemini(referenceUrl, cuttingDataUrl) {
     throw error;
   }
 
-  if (!referenceUrl || !cuttingDataUrl) {
+  if (!referenceUrl || !cuttingImageInput) {
     const error = new Error("Both Reference Slip and Cutting Photo are required for verification.");
     error.statusCode = 400;
     throw error;
@@ -25,16 +69,13 @@ async function verifyWithGemini(referenceUrl, cuttingDataUrl) {
     const refRes = await fetch(referenceUrl);
     if (!refRes.ok) throw new Error("Failed to fetch reference slip image");
     const refBuffer = await refRes.arrayBuffer();
+    const referenceMime = refRes.headers.get("content-type") || "image/jpeg";
     const referenceBase64 = Buffer.from(refBuffer).toString("base64");
     
-    // 2. Parse Cutting Photo Base64
-    // Format is "data:image/jpeg;base64,....."
-    const cuttingMatch = cuttingDataUrl.match(/^data:(.+);base64,(.+)$/);
-    if (!cuttingMatch) {
-      throw new Error("Invalid cutting photo data URL format.");
-    }
-    const cuttingMime = cuttingMatch[1];
-    const cuttingBase64 = cuttingMatch[2];
+    // 2. Resolve Cutting Photo from either data URL or direct URL
+    const cuttingImage = await imageInputToBase64(cuttingImageInput);
+    const cuttingMime = cuttingImage.mimeType;
+    const cuttingBase64 = cuttingImage.base64;
 
     const prompt = `You are a strict QA assistant. You must compare the reference measurement slip photo and the newly cut fabric photo (which also contains a slip).
 1. Identify and extract the Order ID from the reference slip.
@@ -58,7 +99,7 @@ Output ONLY a JSON object with this exact structure, no markdown, no other text:
                 { text: prompt },
                 {
                   inlineData: {
-                    mimeType: "image/jpeg",
+                    mimeType: referenceMime,
                     data: referenceBase64
                   }
                 },

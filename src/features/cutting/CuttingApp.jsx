@@ -1,14 +1,6 @@
 ﻿import { useMemo, useState } from "react";
 import { byId, formatDate } from "../../lib/format";
-
-function readFileAsDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = () => reject(new Error("Unable to read file"));
-    reader.readAsDataURL(file);
-  });
-}
+import { preparePhotoPayloadForApi } from "../../lib/api";
 
 export function CuttingApp({ data, onUploadCuttingPhoto, busyAction }) {
   const [uploadError, setUploadError] = useState("");
@@ -26,12 +18,27 @@ export function CuttingApp({ data, onUploadCuttingPhoto, busyAction }) {
     setUploadError("");
 
     try {
-      const dataUrl = await readFileAsDataUrl(file);
+      const { payload, meta } = await preparePhotoPayloadForApi(file, {
+        folder: "bin-hassan-bespoke/cutting"
+      });
+
+      console.log(
+        "[CUTTING_UPLOAD]",
+        JSON.stringify({
+          pieceId,
+          uploadMode: meta.uploadMode,
+          compressedBytes: meta.compressedBytes
+        })
+      );
+
       await onUploadCuttingPhoto({
         piece_id: pieceId,
-        photo_data_url: dataUrl
+        ...payload
       });
     } catch (error) {
+      if (/too large/i.test(error.message || "")) {
+        window.alert(error.message);
+      }
       setUploadError(error.message || "Upload failed");
     }
   };

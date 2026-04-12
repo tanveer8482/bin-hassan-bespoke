@@ -1,4 +1,4 @@
-
+﻿
 import { useMemo, useState, useCallback } from "react";
 import { StatusBadge } from "../../components/StatusBadge";
 import {
@@ -11,6 +11,7 @@ import {
   ORDER_STATUS_META,
   PIECE_STATUS_META
 } from "../../lib/format";
+import { preparePhotoPayloadForApi } from "../../lib/api";
 
 const PIECE_TYPES = ["coat", "pent", "waistcoat", "suit_2piece", "suit_3piece"];
 const ITEM_TYPES = ["normal", "vip", "chapma"];
@@ -415,15 +416,26 @@ export function AdminApp({ data, actions, busyAction }) {
     if (!file) return;
 
     try {
-      const token = window.localStorage.getItem("bhb_token");
-      console.log("Sending token:", token);
-      const dataUrl = await compressImageFile(file, 1024, 300);
+      const { payload, meta } = await preparePhotoPayloadForApi(file, {
+        folder: "bin-hassan-bespoke/cutting"
+      });
+      console.log(
+        "[ADMIN_CUTTING_UPLOAD]",
+        JSON.stringify({
+          pieceId,
+          uploadMode: meta.uploadMode,
+          compressedBytes: meta.compressedBytes
+        })
+      );
       await actions.markPieceCut({
         piece_id: pieceId,
-        photo_data_url: dataUrl
+        ...payload
       });
     } catch (err) {
       console.error("Cutting upload failed:", err);
+      if (/too large/i.test(err.message || "")) {
+        window.alert(err.message);
+      }
       // Ignore local read errors; app-level error toast handles API issues.
     }
   };
@@ -2248,6 +2260,8 @@ export function AdminApp({ data, actions, busyAction }) {
     </div>
   );
 }
+
+
 
 
 

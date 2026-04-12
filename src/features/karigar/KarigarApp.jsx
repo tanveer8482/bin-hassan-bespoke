@@ -7,18 +7,10 @@ import {
   number,
   PIECE_STATUS_META
 } from "../../lib/format";
+import { preparePhotoPayloadForApi } from "../../lib/api";
 
 function pieceBadge(status) {
   return PIECE_STATUS_META[status] || { label: status, tone: "pending" };
-}
-
-function readFileAsDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = () => reject(new Error("Unable to read file"));
-    reader.readAsDataURL(file);
-  });
 }
 
 export function KarigarApp({ user, data, onCompletePiece, busyAction }) {
@@ -53,12 +45,27 @@ export function KarigarApp({ user, data, onCompletePiece, busyAction }) {
     setUploadError("");
 
     try {
-      const dataUrl = await readFileAsDataUrl(file);
+      const { payload, meta } = await preparePhotoPayloadForApi(file, {
+        folder: "bin-hassan-bespoke/completion"
+      });
+
+      console.log(
+        "[WORKER_UPLOAD]",
+        JSON.stringify({
+          pieceId,
+          uploadMode: meta.uploadMode,
+          compressedBytes: meta.compressedBytes
+        })
+      );
+
       await onCompletePiece({
         piece_id: pieceId,
-        photo_data_url: dataUrl
+        ...payload
       });
     } catch (error) {
+      if (/too large/i.test(error.message || "")) {
+        window.alert(error.message);
+      }
       setUploadError(error.message || "Upload failed");
     }
   };
@@ -223,5 +230,3 @@ export function KarigarApp({ user, data, onCompletePiece, busyAction }) {
     </div>
   );
 }
-
-

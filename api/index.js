@@ -18,7 +18,7 @@ const {
   getRecords,
   updateByField
 } = require("../server/api/_lib/sheets");
-const { resolvePhotoInput, uploadDataUrlToCloudinary } = require("../server/api/_lib/media");
+const { resolvePhotoInput } = require("../server/api/_lib/media");
 const { verifyWithGemini } = require("../server/api/_lib/gemini");
 const {
   id,
@@ -659,7 +659,17 @@ async function markPieceCut(req, res) {
   await ensureWorkbook();
 
   const body = await parseBody(req);
-  requireFields(body, ["piece_id", "photo_data_url"]);
+  requireFields(body, ["piece_id"]);
+
+  const photoDataUrl = normalizeText(body.photo_data_url);
+  const photoUrl = normalizeText(body.photo_url);
+  if (!photoDataUrl && !photoUrl) {
+    const error = new Error("Either photo_data_url or photo_url is required");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const verificationSource = photoDataUrl || photoUrl;
   console.log("[CUT] markPieceCut requested by:", user.username, "piece_id:", body.piece_id);
 
   const allPieces = await getRecords(SHEETS.PIECES);
@@ -674,7 +684,7 @@ async function markPieceCut(req, res) {
   // 1. Verify with Gemini AI
   if (piece.reference_slip_url) {
     try {
-      await verifyWithGemini(piece.reference_slip_url, body.photo_data_url);
+      await verifyWithGemini(piece.reference_slip_url, verificationSource);
     } catch (err) {
       if (err.statusCode === 400) {
         throw err;
@@ -683,8 +693,15 @@ async function markPieceCut(req, res) {
     }
   }
 
-  // 2. Upload the cutting photo
-  const cuttingPhotoUrl = await uploadDataUrlToCloudinary(body.photo_data_url, "cutting");
+  // 2. Persist cutting photo URL (Cloudinary direct URL preferred, fallback uploads from data URL)
+  let cuttingPhotoUrl = photoUrl;
+  if (!cuttingPhotoUrl) {
+    const resolved = await resolvePhotoInput({
+      photoDataUrl,
+      folder: "cutting"
+    });
+    cuttingPhotoUrl = resolved.photoUrl;
+  }
 
   const updates = {
     cutting_done: true,
@@ -732,9 +749,29 @@ async function completePiece(req, res) {
   const body = await parseBody(req);
   requireFields(body, ["piece_id"]);
 
+  const photoDataUrl = normalizeText(body.photo_data_url);
+  const photoUrl = normalizeText(body.photo_url);
+  if (!photoDataUrl && !photoUrl) {
+    const error = new Error("Either photo_data_url or photo_url is required");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  let completionPhotoUrl = photoUrl;
+  if (!completionPhotoUrl) {
+    const resolved = await resolvePhotoInput({
+      photoDataUrl,
+      folder: "completion"
+    });
+    completionPhotoUrl = resolved.photoUrl;
+  }
+
   const updates = {
     karigar_status: STATUS.KARIGAR.COMPLETE,
-    karigar_complete_date: nowISO()
+    karigar_complete_date: nowISO(),
+    completion_photo_url: completionPhotoUrl,
+    completion_verified: true,
+    completion_verified_date: nowISO()
   };
 
   await updateByField(SHEETS.PIECES, "piece_id", body.piece_id, updates);
