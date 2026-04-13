@@ -1,4 +1,4 @@
-﻿const SHEETS = {
+const SHEETS = {
   USERS: "Users",
   SHOPS: "Shops",
   KARIGAR: "Karigar",
@@ -8,8 +8,9 @@
   PAYMENTS_SHOPS: "Payments_Shops",
   PAYMENTS_KARIGAR: "Payments_Karigar",
   SETTINGS: "Settings",
-  SHOP_RATES: "ShopRates",
-  KARIGAR_RATES: "KarigarRates"
+  PRODUCTS: "Products",
+  PRODUCT_SUB_PRODUCTS: "ProductSubProducts",
+  SHOP_INVOICES: "ShopInvoices"
 };
 
 const STATUS = {
@@ -23,6 +24,7 @@ const STATUS = {
   KARIGAR: {
     NOT_ASSIGNED: "not_assigned",
     ASSIGNED: "assigned",
+    PENDING_APPROVAL: "pending_approval",
     COMPLETE: "complete"
   }
 };
@@ -57,6 +59,8 @@ const REQUIRED_HEADERS = {
     "designing_shop_charge",
     "slip_photo_url",
     "status",
+    "is_archived",
+    "billed_date",
     "created_date",
     "updated_date"
   ],
@@ -74,6 +78,7 @@ const REQUIRED_HEADERS = {
     "item_id",
     "order_id",
     "piece_name",
+    "sub_product_name",
     "item_type",
     "cutting_done",
     "cutting_by",
@@ -93,6 +98,8 @@ const REQUIRED_HEADERS = {
     "designing_karigar_charge",
     "shop_rate",
     "karigar_rate",
+    "is_synced",
+    "sync_id",
     "bundle_piece_type",
     "created_date",
     "updated_date"
@@ -100,8 +107,9 @@ const REQUIRED_HEADERS = {
   [SHEETS.PAYMENTS_SHOPS]: ["payment_id", "shop_id", "amount", "payment_date", "note", "recorded_by"],
   [SHEETS.PAYMENTS_KARIGAR]: ["payment_id", "karigar_id", "amount", "payment_date", "note", "recorded_by"],
   [SHEETS.SETTINGS]: ["key", "value", "description"],
-  [SHEETS.SHOP_RATES]: ["shop_id", "piece_name", "item_type", "rate"],
-  [SHEETS.KARIGAR_RATES]: ["karigar_id", "piece_name", "item_type", "rate"]
+  [SHEETS.PRODUCTS]: ["product_id", "product_name", "shop_name", "shop_rate"],
+  [SHEETS.PRODUCT_SUB_PRODUCTS]: ["sub_id", "product_id", "sub_product_name", "worker_rate"],
+  [SHEETS.SHOP_INVOICES]: ["invoice_id", "shop_id", "total_amount", "generated_date", "order_ids"]
 };
 
 const ITEM_TYPES = ["normal", "vip", "chapma"];

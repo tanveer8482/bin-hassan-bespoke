@@ -1,4 +1,4 @@
-﻿import { useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { StatusBadge } from "../../components/StatusBadge";
 import {
   byId,
@@ -28,9 +28,9 @@ export function KarigarApp({ user, data, onCompletePiece, busyAction }) {
 
     if (filter === "all") return sorted;
     if (filter === "complete") {
-      return sorted.filter((piece) => piece.karigar_status === "complete");
+      return sorted.filter((piece) => piece.karigar_status === "complete" || piece.karigar_status === "pending_approval");
     }
-    return sorted.filter((piece) => piece.karigar_status !== "complete");
+    return sorted.filter((piece) => piece.karigar_status !== "complete" && piece.karigar_status !== "pending_approval");
   }, [data.pieces, filter]);
 
   const paymentSummary = data.computed?.karigarFinancials?.[user.entity_id] || {
@@ -143,23 +143,38 @@ export function KarigarApp({ user, data, onCompletePiece, busyAction }) {
                     <p className="muted">Reference slip not available</p>
                   )}
 
-                  {piece.karigar_status !== "complete" ? (
-                    <label className="file-upload">
-                      <input
-                        type="file"
-                        accept="image/*"
-                        capture="environment"
-                        onChange={(event) =>
-                          submitCompletionPhoto(piece.piece_id, event.target.files?.[0])
-                        }
+                  {piece.karigar_status === "assigned" ? (
+                    <div className="button-group-vertical">
+                      <label className="file-upload">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          capture="environment"
+                          onChange={(event) =>
+                            submitCompletionPhoto(piece.piece_id, event.target.files?.[0])
+                          }
+                          disabled={busyAction === `complete:${piece.piece_id}`}
+                        />
+                        <span>
+                          {busyAction === `complete:${piece.piece_id}`
+                            ? "Uploading..."
+                            : "Request Approval (With Photo)"}
+                        </span>
+                      </label>
+
+                      <button 
+                        className="button secondary small"
+                        onClick={() => onCompletePiece({ piece_id: piece.piece_id })}
                         disabled={busyAction === `complete:${piece.piece_id}`}
-                      />
-                      <span>
-                        {busyAction === `complete:${piece.piece_id}`
-                          ? "Uploading..."
-                          : "Upload Completion Photo"}
-                      </span>
-                    </label>
+                        style={{marginTop: '0.5rem'}}
+                      >
+                        Request Approval (No Photo)
+                      </button>
+                    </div>
+                  ) : piece.karigar_status === "pending_approval" ? (
+                    <div className="alert highlight">
+                      Waiting for Admin Approval
+                    </div>
                   ) : piece.completion_photo_url ? (
                     <a
                       className="link"

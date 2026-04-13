@@ -19,13 +19,13 @@ const ITEM_TYPES = ["normal", "vip", "chapma"];
 const TAB_LIST = [
   { key: "dashboard", label: "Dashboard" },
   { key: "orders", label: "Orders" },
+  { key: "products", label: "Product Manager" },
   { key: "cutting", label: "Cutting" },
   { key: "assign", label: "Assign Work" },
   { key: "shops", label: "Shops" },
   { key: "karigar", label: "Karigar" },
   { key: "payments", label: "Payments" },
-  { key: "track", label: "Track & Alerts" },
-  { key: "settings", label: "Settings" }
+  { key: "track", label: "Track & Alerts" }
 ];
 
 function debounce(func, wait) {
@@ -204,6 +204,10 @@ export function AdminApp({ data, actions, busyAction }) {
     display_name: "",
     entity_id: ""
   });
+
+  const [productForm, setProductForm] = useState({ product_name: "", shop_name: "", shop_rate: "" });
+  const [subProductForm, setSubProductForm] = useState({ product_id: "", sub_product_name: "", worker_rate: "" });
+  const [syncBusy, setSyncBusy] = useState(false);
 
   const [settingForm, setSettingForm] = useState({ key: "", value: "", description: "" });
   const [trackOrderId, setTrackOrderId] = useState("");
@@ -673,7 +677,38 @@ export function AdminApp({ data, actions, busyAction }) {
             </div>
           </div>
 
+          <div className="panel inset warning-box" style={{ margin: '1rem 0' }}>
+             <div className="panel-head">
+                <h3>Admin Batch Controls</h3>
+                <button 
+                  className="button primary" 
+                  onClick={handleSyncPayroll}
+                  disabled={syncBusy}
+                >
+                  {syncBusy ? "Syncing..." : "Sync Completed Pieces to Payroll"}
+                </button>
+             </div>
+          </div>
+
           <div className="split-grid">
+            <div className="panel inset">
+              <h3>Pending Approvals (QC)</h3>
+              {data.pieces.filter(p => p.karigar_status === "pending_approval").map((piece) => (
+                <div className="inline-list-row" key={piece.piece_id}>
+                  <div>
+                    <strong>{piece.piece_name}</strong> - {piece.item_type}
+                    <p className="muted">Order: {ordersById[piece.order_id]?.order_number}</p>
+                  </div>
+                  <button className="button success small" onClick={() => handleApprovePiece(piece.piece_id)}>
+                    Approve
+                  </button>
+                </div>
+              ))}
+              {!data.pieces.filter(p => p.karigar_status === "pending_approval").length ? (
+                <p className="muted">No pieces waiting for approval.</p>
+              ) : null}
+            </div>
+
             <div className="panel inset">
               <h3>Due Today</h3>
               {dueSummary.dueToday.map((order) => (
@@ -690,6 +725,10 @@ export function AdminApp({ data, actions, busyAction }) {
               {!dueSummary.dueToday.length ? (
                 <p className="muted">No orders due today.</p>
               ) : null}
+            </div>
+          </div>
+        </section>
+      ) : null}
             </div>
 
             <div className="panel inset">
@@ -709,6 +748,70 @@ export function AdminApp({ data, actions, busyAction }) {
                 <p className="muted">No overdue orders.</p>
               ) : null}
             </div>
+          </div>
+        </section>
+      ) : null}
+
+      {tab === "products" ? (
+        <section className="panel">
+          <h2>Product Manager</h2>
+          <div className="split-grid">
+            <div className="panel inset">
+              <h3>Add New Product</h3>
+              <form className="form-grid" onSubmit={submitProduct}>
+                <label>Product Name (e.g. 3-Piece VIP)
+                  <input className="input" value={productForm.product_name} onChange={e => setProductForm({...productForm, product_name: e.target.value})} required />
+                </label>
+                <label>Shop Name
+                  <input className="input" value={productForm.shop_name} onChange={e => setProductForm({...productForm, shop_name: e.target.value})} required />
+                </label>
+                <label>Shop Rate
+                  <input type="number" className="input" value={productForm.shop_rate} onChange={e => setProductForm({...productForm, shop_rate: e.target.value})} required />
+                </label>
+                <button className="button primary" type="submit">Save Product</button>
+              </form>
+            </div>
+            <div className="panel inset">
+              <h3>Define Sub-Products & Worker Rates</h3>
+              <form className="form-grid" onSubmit={submitSubProduct}>
+                <label>Parent Product
+                  <select className="input" value={subProductForm.product_id} onChange={e => setSubProductForm({...subProductForm, product_id: e.target.value})} required>
+                    <option value="">Select Product</option>
+                    {data.products.map(p => <option key={p.product_id} value={p.product_id}>{p.product_name} ({p.shop_name})</option>)}
+                  </select>
+                </label>
+                <label>Sub-Product Name (e.g. Coat)
+                  <input className="input" value={subProductForm.sub_product_name} onChange={e => setSubProductForm({...subProductForm, sub_product_name: e.target.value})} required />
+                </label>
+                <label>Worker Rate
+                  <input type="number" className="input" value={subProductForm.worker_rate} onChange={e => setSubProductForm({...subProductForm, worker_rate: e.target.value})} required />
+                </label>
+                <button className="button warning" type="submit">Add Sub-Product</button>
+              </form>
+            </div>
+          </div>
+
+          <div className="table-wrap" style={{marginTop:'2rem'}}>
+            <table>
+              <thead>
+                <tr><th>Product</th><th>Shop Rate</th><th>Sub-Products</th></tr>
+              </thead>
+              <tbody>
+                {data.products.map(p => (
+                  <tr key={p.product_id}>
+                    <td>{p.product_name}</td>
+                    <td>{p.shop_rate}</td>
+                    <td>
+                      {data.productSubProducts.filter(s => s.product_id === p.product_id).map(s => (
+                        <span key={s.sub_id} className="badge" style={{marginRight:'4px'}}>
+                          {s.sub_product_name}: {s.worker_rate}
+                        </span>
+                      ))}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </section>
       ) : null}
@@ -835,21 +938,21 @@ export function AdminApp({ data, actions, busyAction }) {
               {orderForm.items.map((item, index) => (
                 <div className="item-row" key={`item-${index}`}>
                   <label>
-                    Piece Type
-                    <select
-                      className="input"
-                      value={item.piece_type}
-                      onChange={(event) =>
-                        updateOrderItem(index, "piece_type", event.target.value)
-                      }
-                    >
-                      {PIECE_TYPES.map((option) => (
-                        <option key={option} value={option}>
-                          {option}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                Product Configuration
+                <select
+                  className="input"
+                  value={item.piece_type}
+                  onChange={(event) => updateOrderItem(index, "piece_type", event.target.value)}
+                  required
+                >
+                  <option value="">Select Product Configuration</option>
+                  {data.products.map((p) => (
+                    <option key={p.product_id} value={p.product_name}>
+                      {p.product_name} ({p.shop_name})
+                    </option>
+                  ))}
+                </select>
+              </label>
 
                   <label>
                     Item Type

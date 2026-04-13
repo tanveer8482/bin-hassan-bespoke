@@ -1,4 +1,4 @@
-﻿const API_BASE = "/api";
+const API_BASE = "/api";
 
 const REQUEST_TIMEOUT_MS = 10000;
 const MAX_VERCEL_SAFE_BODY_BYTES = Math.floor(4.2 * 1024 * 1024);
@@ -350,13 +350,24 @@ export const api = {
     request("/index?action=createOrder", { method: "POST", token, body }),
   updateOrder: (token, body) =>
     request("/index?action=updateOrder", { method: "PATCH", token, body }),
+  extractOrder: (token, body) =>
+    request("/index?action=extractOrder", { method: "POST", token, body }),
 
   markPieceCut: (token, body) =>
     request("/index?action=markPieceCut", { method: "POST", token, body }),
   assignPiece: (token, body) =>
     request("/index?action=assignPiece", { method: "POST", token, body }),
+  requestApproval: (token, body) =>
+    request("/index?action=requestApproval", { method: "POST", token, body }),
+  approvePiece: (token, body) =>
+    request("/index?action=approvePiece", { method: "POST", token, body }),
+  syncPayroll: (token, body) =>
+    request("/index?action=syncPayroll", { method: "POST", token, body }),
+  generateInvoice: (token, body) =>
+    request("/index?action=generateInvoice", { method: "POST", token, body }),
+
   completePiece: (token, body) =>
-    request("/index?action=completePiece", { method: "POST", token, body }),
+    request("/index?action=requestApproval", { method: "POST", token, body }),
 
   listShops: (token) => request("/index?action=listShops", { token }),
   createShop: (token, body) =>
@@ -370,13 +381,12 @@ export const api = {
   updateKarigar: (token, body) =>
     request("/index?action=updateKarigar", { method: "PATCH", token, body }),
 
-  listShopRates: (token) => request("/index?action=listShopRates", { token }),
-  saveShopRates: (token, body) =>
-    request("/index?action=saveShopRates", { method: "POST", token, body }),
-
-  listKarigarRates: (token) => request("/index?action=listKarigarRates", { token }),
-  saveKarigarRates: (token, body) =>
-    request("/index?action=saveKarigarRates", { method: "POST", token, body }),
+  listProducts: (token) => request("/index?action=listProducts", { token }),
+  saveProduct: (token, body) =>
+    request("/index?action=saveProduct", { method: "POST", token, body }),
+  listSubProducts: (token) => request("/index?action=listSubProducts", { token }),
+  saveSubProduct: (token, body) =>
+    request("/index?action=saveSubProduct", { method: "POST", token, body }),
 
   listShopPayments: (token) => request("/index?action=listShopPayments", { token }),
   createShopPayment: (token, body) =>
@@ -399,4 +409,5 @@ export const api = {
   saveSettings: (token, body) =>
     request("/index?action=saveSettings", { method: "POST", token, body })
 };
+
 

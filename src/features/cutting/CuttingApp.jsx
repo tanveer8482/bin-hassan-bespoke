@@ -1,4 +1,4 @@
-﻿import { useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { byId, formatDate } from "../../lib/format";
 import { preparePhotoPayloadForApi } from "../../lib/api";
 
@@ -81,22 +81,33 @@ export function CuttingApp({ data, onUploadCuttingPhoto, busyAction }) {
                   <p className="muted">Reference slip not available</p>
                 )}
 
-                <label className="file-upload">
-                  <input
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    onChange={(event) =>
-                      handleFileChange(piece.piece_id, event.target.files?.[0])
-                    }
+                <div className="button-group-vertical">
+                  <label className="file-upload">
+                    <input
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      onChange={(event) =>
+                        handleFileChange(piece.piece_id, event.target.files?.[0])
+                      }
+                      disabled={busyAction === `cut:${piece.piece_id}`}
+                    />
+                    <span>
+                      {busyAction === `cut:${piece.piece_id}`
+                        ? "Uploading..."
+                        : "Upload Cutting Photo"}
+                    </span>
+                  </label>
+
+                  <button 
+                    className="button secondary small"
+                    onClick={() => onUploadCuttingPhoto({ piece_id: piece.piece_id })}
                     disabled={busyAction === `cut:${piece.piece_id}`}
-                  />
-                  <span>
-                    {busyAction === `cut:${piece.piece_id}`
-                      ? "Uploading..."
-                      : "Upload Cutting Photo"}
-                  </span>
-                </label>
+                    style={{marginTop: '0.5rem'}}
+                  >
+                    Mark Cut (No Photo)
+                  </button>
+                </div>
               </article>
             );
           })}

@@ -1,4 +1,4 @@
-﻿const {
+const {
   BUNDLE_PIECE_TYPES,
   PIECE_EXPANSION,
   ROLES,
@@ -221,7 +221,24 @@ function computeKarigarFinancials(pieces, paymentsKarigar) {
   const earnedByKarigar = pieces.reduce((map, piece) => {
     const karigarId = piece.assigned_karigar_id;
     if (!karigarId) return map;
+    
+    // Only count as earned if completed AND synced
     if (normalizeKey(piece.karigar_status) !== STATUS.KARIGAR.COMPLETE) return map;
+    if (!parseBoolean(piece.is_synced)) return map;
+
+    if (!map[karigarId]) map[karigarId] = 0;
+    map[karigarId] +=
+      toNumber(piece.karigar_rate) + toNumber(piece.designing_karigar_charge);
+    return map;
+  }, {});
+
+  const pendingByKarigar = pieces.reduce((map, piece) => {
+    const karigarId = piece.assigned_karigar_id;
+    if (!karigarId) return map;
+    
+    // Count as pending if completed but NOT synced
+    if (normalizeKey(piece.karigar_status) !== STATUS.KARIGAR.COMPLETE) return map;
+    if (parseBoolean(piece.is_synced)) return map;
 
     if (!map[karigarId]) map[karigarId] = 0;
     map[karigarId] +=
@@ -237,15 +254,18 @@ function computeKarigarFinancials(pieces, paymentsKarigar) {
 
   const allKarigarIds = new Set([
     ...Object.keys(earnedByKarigar),
+    ...Object.keys(pendingByKarigar),
     ...Object.keys(paidByKarigar)
   ]);
 
   const summary = {};
   allKarigarIds.forEach((karigarId) => {
     const earned = earnedByKarigar[karigarId] || 0;
+    const pending = pendingByKarigar[karigarId] || 0;
     const paid = paidByKarigar[karigarId] || 0;
     summary[karigarId] = {
       earned,
+      pending,
       paid,
       balance: earned - paid
     };
@@ -279,14 +299,15 @@ function filterSnapshotByRole(user, snapshot) {
   if (user.role === ROLES.SHOP) {
     const shopId = user.entity_id;
 
-    const orders = snapshot.orders.filter((order) => order.shop_id === shopId);
-    const orderIds = new Set(orders.map((order) => order.order_id));
+    const orders = snapshot.orders.filter((order) => order.shop_id === shopId && !parseBoolean(order.is_archived));
+    const archivedOrders = snapshot.orders.filter((order) => order.shop_id === shopId && parseBoolean(order.is_archived));
+    const allOrderIds = new Set(snapshot.orders.filter(o => o.shop_id === shopId).map(o => o.order_id));
 
-    const orderItems = snapshot.orderItems.filter((item) => orderIds.has(item.order_id));
+    const orderItems = snapshot.orderItems.filter((item) => allOrderIds.has(item.order_id));
     const itemIds = new Set(orderItems.map((item) => item.item_id));
 
     const pieces = snapshot.pieces.filter(
-      (piece) => orderIds.has(piece.order_id) || itemIds.has(piece.item_id)
+      (piece) => allOrderIds.has(piece.order_id) || itemIds.has(piece.item_id)
     );
 
     const karigarIds = new Set(
@@ -303,14 +324,14 @@ function filterSnapshotByRole(user, snapshot) {
         karigarIds.has(karigar.karigar_id)
       ),
       orders,
+      archivedOrders,
       orderItems,
       pieces,
       paymentsShops: snapshot.paymentsShops.filter(
         (payment) => payment.shop_id === shopId
       ),
       paymentsKarigar: [],
-      shopRates: snapshot.shopRates.filter((rate) => rate.shop_id === shopId),
-      karigarRates: [],
+      products: snapshot.products.filter(p => p.shop_name === snapshot.shops.find(s => s.shop_id === shopId)?.shop_name),
       settings: [],
       computed: filterComputedForRole(
         snapshot.computed,
@@ -436,8 +457,9 @@ async function loadFullSnapshot() {
     paymentsShops,
     paymentsKarigar,
     settings,
-    shopRates,
-    karigarRates
+    products,
+    productSubProducts,
+    shopInvoices
   ] = await Promise.all([
     getRecords(SHEETS.USERS),
     getRecords(SHEETS.SHOPS),
@@ -448,8 +470,9 @@ async function loadFullSnapshot() {
     getRecords(SHEETS.PAYMENTS_SHOPS),
     getRecords(SHEETS.PAYMENTS_KARIGAR),
     getRecords(SHEETS.SETTINGS),
-    getRecords(SHEETS.SHOP_RATES),
-    getRecords(SHEETS.KARIGAR_RATES)
+    getRecords(SHEETS.PRODUCTS),
+    getRecords(SHEETS.PRODUCT_SUB_PRODUCTS),
+    getRecords(SHEETS.SHOP_INVOICES)
   ]);
 
   return {
@@ -462,8 +485,9 @@ async function loadFullSnapshot() {
     paymentsShops,
     paymentsKarigar,
     settings,
-    shopRates,
-    karigarRates
+    products,
+    productSubProducts,
+    shopInvoices
   };
 }
 

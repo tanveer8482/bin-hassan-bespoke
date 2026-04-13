@@ -1,6 +1,6 @@
 const { URL } = require("url");
 const bcrypt = require("bcryptjs");
-const { PIECE_EXPANSION, ROLES, SHEETS, STATUS } = require("../server/api/_lib/constants");
+const { ROLES, SHEETS, STATUS } = require("../server/api/_lib/constants");
 const {
   computeShopFinancials,
   filterSnapshotByRole,
@@ -17,10 +17,10 @@ const {
   appendRecordsBatch,
   ensureWorkbook,
   getRecords,
-  updateByField
+  updateByField,
+  updateMany
 } = require("../server/api/_lib/sheets");
 const { resolvePhotoInput } = require("../server/api/_lib/media");
-const { verifyWithGemini } = require("../server/api/_lib/gemini");
 const {
   id,
   normalizeKey,
@@ -36,21 +36,9 @@ const {
 // ============ BOOTSTRAP HANDLERS ============
 
 const DEFAULT_SETTINGS = [
-  {
-    key: "item_types",
-    value: "normal,vip,chapma",
-    description: "Allowed item types"
-  },
-  {
-    key: "piece_types",
-    value: "coat,pent,waistcoat,suit_2piece,suit_3piece",
-    description: "Supported order piece types"
-  },
-  {
-    key: "cutting_rate",
-    value: "0",
-    description: "Default cutting rate per piece"
-  }
+  { key: "item_types", value: "normal,vip,chapma", description: "Allowed item types" },
+  { key: "piece_types", value: "coat,pent,waistcoat,suit_2piece,suit_3piece", description: "Supported order piece types" },
+  { key: "cutting_rate", value: "0", description: "Default cutting rate per piece" }
 ];
 
 async function seedDefaults() {
@@ -63,25 +51,17 @@ async function seedDefaults() {
 async function handleBootstrap(req, res) {
   ensureMethod(req, ["POST"]);
   await ensureWorkbook();
-
   const users = await getRecords(SHEETS.USERS);
   const body = await parseBody(req);
 
   if (!users.length) {
-    requireFields(body, [
-      "bootstrap_key",
-      "admin_username",
-      "admin_password",
-      "admin_display_name"
-    ]);
-
+    requireFields(body, ["bootstrap_key", "admin_username", "admin_password", "admin_display_name"]);
     const env = getEnv();
     if (body.bootstrap_key !== env.myAdminKey) {
       const error = new Error("Invalid bootstrap key");
       error.statusCode = 401;
       throw error;
     }
-
     const record = {
       username: normalizeText(body.admin_username),
       password: await bcrypt.hash(String(body.admin_password), 10),
@@ -89,21 +69,13 @@ async function handleBootstrap(req, res) {
       display_name: normalizeText(body.admin_display_name),
       entity_id: ""
     };
-
     await appendRecord(SHEETS.USERS, record);
     await seedDefaults();
-
-    return sendOk(res, {
-      message: "Workbook bootstrapped with initial admin user"
-    });
+    return sendOk(res, { message: "Workbook bootstrapped with initial admin user" });
   }
-
   requireRole(req, [ROLES.ADMIN]);
   await seedDefaults();
-
-  sendOk(res, {
-    message: "Default settings ensured"
-  });
+  sendOk(res, { message: "Default settings ensured" });
 }
 
 // ============ LOGIN HANDLERS ============
@@ -111,1107 +83,347 @@ async function handleBootstrap(req, res) {
 async function handleLogin(req, res) {
   ensureMethod(req, ["POST"]);
   await ensureWorkbook();
-
   const existingUsers = await getRecords(SHEETS.USERS);
-  if (!existingUsers.length) {
-    const error = new Error(
-      "No users found in Users sheet. Seed an admin user first."
-    );
-    error.statusCode = 400;
-    throw error;
-  }
-
+  if (!existingUsers.length) throw new Error("No users found. Bootstrap first.");
   const body = await parseBody(req);
   requireFields(body, ["username", "password"]);
-
   const user = await authenticate(body.username, body.password);
   const token = createToken(user);
   const env = getEnv();
-
-  sendOk(res, {
-    token,
-    user,
-    poll_interval_ms: env.pollIntervalMs,
-    last_synced: new Date().toISOString()
-  });
+  sendOk(res, { token, user, poll_interval_ms: env.pollIntervalMs, last_synced: nowISO() });
 }
 
-// ============ SHOPS HANDLERS ============
+// ============ UTILS ============
 
 function stripMeta(record) {
   const { __rowNumber, ...rest } = record;
   return rest;
 }
 
-async function listShops(res, user) {
-  if (![ROLES.ADMIN, ROLES.SHOP].includes(user.role)) {
-    const error = new Error("Forbidden");
-    error.statusCode = 403;
-    throw error;
-  }
-
-  await ensureWorkbook();
-
-  const [shops, snapshot] = await Promise.all([
-    getRecords(SHEETS.SHOPS),
-    loadFullSnapshot()
-  ]);
-
-  const financials = computeShopFinancials(
-    snapshot.orders,
-    snapshot.orderItems,
-    snapshot.paymentsShops
-  );
-
-  const filtered =
-    user.role === ROLES.ADMIN
-      ? shops
-      : shops.filter((shop) => shop.shop_id === user.entity_id);
-
-  sendOk(res, {
-    shops: filtered.map(stripMeta),
-    shop_financials: financials,
-    last_synced: new Date().toISOString()
-  });
-}
-
-async function createShop(req, res) {
-  requireRole(req, [ROLES.ADMIN]);
-  await ensureWorkbook();
-
-  const body = await parseBody(req);
-  requireFields(body, ["shop_name"]);
-
-  const shopId = normalizeText(body.shop_id) || id("shop");
-
-  const existing = await getRecords(SHEETS.SHOPS);
-  if (existing.some((shop) => shop.shop_id === shopId)) {
-    const error = new Error("shop_id already exists");
-    error.statusCode = 400;
-    throw error;
-  }
-
-  const now = nowISO();
-  const record = {
-    shop_id: shopId,
-    shop_name: normalizeText(body.shop_name),
-    contact: normalizeText(body.contact),
-    created_date: now
-  };
-
-  await appendRecord(SHEETS.SHOPS, record);
-
-  sendOk(res, {
-    message: "Shop created",
-    shop: record
-  });
-}
-
-async function updateShop(req, res) {
-  requireRole(req, [ROLES.ADMIN]);
-  await ensureWorkbook();
-
-  const body = await parseBody(req);
-  requireFields(body, ["shop_id"]);
-
-  const patch = {};
-  if (body.shop_name !== undefined) patch.shop_name = normalizeText(body.shop_name);
-  if (body.contact !== undefined) patch.contact = normalizeText(body.contact);
-
-  if (!Object.keys(patch).length) {
-    const error = new Error("No updatable fields provided");
-    error.statusCode = 400;
-    throw error;
-  }
-
-  const updated = await updateByField(SHEETS.SHOPS, "shop_id", body.shop_id, patch);
-
-  sendOk(res, {
-    message: "Shop updated",
-    shop: stripMeta(updated)
-  });
-}
-
-// ============ KARIGAR HANDLERS ============
-
-async function listKarigar(res, user) {
-  requireRole(user, [ROLES.ADMIN, ROLES.CUTTING]);
-
-  const records = await getRecords(SHEETS.KARIGAR);
-
-  sendOk(res, records);
-}
-
-async function createKarigar(req, res) {
-  requireRole(req, [ROLES.ADMIN]);
-  await ensureWorkbook();
-
-  const body = await parseBody(req);
-  requireFields(body, ["name"]);
-
-  const karigarId = normalizeText(body.karigar_id) || id("karigar");
-
-  const existing = await getRecords(SHEETS.KARIGAR);
-  if (existing.some((karigar) => karigar.karigar_id === karigarId)) {
-    const error = new Error("karigar_id already exists");
-    error.statusCode = 400;
-    throw error;
-  }
-
-  const now = nowISO();
-  const record = {
-    karigar_id: karigarId,
-    name: normalizeText(body.name),
-    contact: normalizeText(body.contact),
-    created_date: now
-  };
-
-  await appendRecord(SHEETS.KARIGAR, record);
-
-  sendOk(res, {
-    message: "Karigar created",
-    karigar: record
-  });
-}
-
-async function updateKarigar(req, res) {
-  requireRole(req, [ROLES.ADMIN]);
-  await ensureWorkbook();
-
-  const body = await parseBody(req);
-  requireFields(body, ["karigar_id"]);
-
-  const patch = {};
-  if (body.name !== undefined) patch.name = normalizeText(body.name);
-  if (body.contact !== undefined) patch.contact = normalizeText(body.contact);
-
-  if (!Object.keys(patch).length) {
-    const error = new Error("No updatable fields provided");
-    error.statusCode = 400;
-    throw error;
-  }
-
-  const updated = await updateByField(SHEETS.KARIGAR, "karigar_id", body.karigar_id, patch);
-
-  sendOk(res, {
-    message: "Karigar updated",
-    karigar: stripMeta(updated)
-  });
-}
-
-async function handleKarigar(req, res) {
-  ensureMethod(req, ["GET", "POST", "PATCH"]);
-
-  const user = requireAuth(req);
-
-  if (req.method === "GET") {
-    return listKarigar(res, user);
-  }
-
-  if (req.method === "POST") {
-    return createKarigar(req, res);
-  }
-
-  return updateKarigar(req, res);
-}
-
-// ============ USERS HANDLERS ============
-
-async function listUsers(res, user) {
-  requireRole(user, [ROLES.ADMIN]);
-
-  const records = await getRecords(SHEETS.USERS);
-
-  sendOk(res, records.map(stripMeta));
-}
-
-async function createUser(req, res) {
-  requireRole(req, [ROLES.ADMIN]);
-  await ensureWorkbook();
-
-  const body = await parseBody(req);
-  requireFields(body, ["username", "password", "role", "display_name"]);
-
-  const username = normalizeText(body.username);
-
-  const existing = await getRecords(SHEETS.USERS);
-  if (existing.some((user) => normalizeKey(user.username) === normalizeKey(username))) {
-    const error = new Error("username already exists");
-    error.statusCode = 400;
-    throw error;
-  }
-
-  const record = {
-    username,
-    password: body.password,
-    role: body.role,
-    display_name: normalizeText(body.display_name),
-    entity_id: body.entity_id || ""
-  };
-
-  await appendRecord(SHEETS.USERS, record);
-
-  sendOk(res, {
-    message: "User created",
-    user: stripPrivateUser(record)
-  });
-}
-
-async function updateUser(req, res) {
-  requireRole(req, [ROLES.ADMIN]);
-  await ensureWorkbook();
-
-  const body = await parseBody(req);
-  requireFields(body, ["username"]);
-
-  const patch = {};
-  if (body.new_username !== undefined) patch.username = normalizeText(body.new_username);
-  if (body.password !== undefined) patch.password = body.password;
-  if (body.role !== undefined) patch.role = body.role;
-  if (body.display_name !== undefined) patch.display_name = normalizeText(body.display_name);
-  if (body.entity_id !== undefined) patch.entity_id = body.entity_id;
-
-  if (!Object.keys(patch).length) {
-    const error = new Error("No updatable fields provided");
-    error.statusCode = 400;
-    throw error;
-  }
-
-  const updated = await updateByField(SHEETS.USERS, "username", body.username, patch);
-
-  sendOk(res, {
-    message: "User updated",
-    user: stripPrivateUser(stripMeta(updated))
-  });
-}
-
-async function deleteUser(req, res) {
-  requireRole(req, [ROLES.ADMIN]);
-  await ensureWorkbook();
-
-  const body = await parseBody(req);
-  requireFields(body, ["username"]);
-
-  const updated = await updateByField(SHEETS.USERS, "username", body.username, { role: "deleted" });
-
-  sendOk(res, {
-    message: "User deleted"
-  });
-}
-
-async function handleUsers(req, res) {
-  ensureMethod(req, ["GET", "POST", "PATCH", "DELETE"]);
-
-  const user = requireAuth(req);
-
-  if (req.method === "GET") {
-    return listUsers(res, user);
-  }
-
-  if (req.method === "POST") {
-    return createUser(req, res);
-  }
-
-  if (req.method === "PATCH") {
-    return updateUser(req, res);
-  }
-
-  return deleteUser(req, res);
-}
-
-// ============ PAYMENTS HANDLERS ============
-
-async function listShopPayments(res, user) {
-  requireRole(user, [ROLES.ADMIN]);
-
-  const records = await getRecords(SHEETS.PAYMENTS_SHOPS);
-
-  sendOk(res, records);
-}
-
-async function createShopPayment(req, res) {
-  requireRole(req, [ROLES.ADMIN]);
-  await ensureWorkbook();
-
-  const body = await parseBody(req);
-  requireFields(body, ["shop_id", "amount", "payment_date"]);
-
-  const paymentId = id("payment");
-
-  const record = {
-    payment_id: paymentId,
-    shop_id: body.shop_id,
-    amount: toNumber(body.amount),
-    payment_date: body.payment_date,
-    note: body.note || "",
-    recorded_by: req.user.username
-  };
-
-  await appendRecord(SHEETS.PAYMENTS_SHOPS, record);
-
-  sendOk(res, {
-    message: "Shop payment recorded",
-    payment: record
-  });
-}
-
-async function handlePaymentsShops(req, res) {
-  ensureMethod(req, ["GET", "POST"]);
-
-  const user = requireAuth(req);
-
-  if (req.method === "GET") {
-    return listShopPayments(res, user);
-  }
-
-  return createShopPayment(req, res);
-}
-
-async function listKarigarPayments(res, user) {
-  requireRole(user, [ROLES.ADMIN]);
-
-  const records = await getRecords(SHEETS.PAYMENTS_KARIGAR);
-
-  sendOk(res, records);
-}
-
-async function createKarigarPayment(req, res) {
-  requireRole(req, [ROLES.ADMIN]);
-  await ensureWorkbook();
-
-  const body = await parseBody(req);
-  requireFields(body, ["karigar_id", "amount", "payment_date"]);
-
-  const paymentId = id("payment");
-
-  const record = {
-    payment_id: paymentId,
-    karigar_id: body.karigar_id,
-    amount: toNumber(body.amount),
-    payment_date: body.payment_date,
-    note: body.note || "",
-    recorded_by: req.user.username
-  };
-
-  await appendRecord(SHEETS.PAYMENTS_KARIGAR, record);
-
-  sendOk(res, {
-    message: "Karigar payment recorded",
-    payment: record
-  });
-}
-
-async function handlePaymentsKarigar(req, res) {
-  ensureMethod(req, ["GET", "POST"]);
-
-  const user = requireAuth(req);
-
-  if (req.method === "GET") {
-    return listKarigarPayments(res, user);
-  }
-
-  return createKarigarPayment(req, res);
-}
-
-// ============ RATES HANDLERS ============
-
-async function listShopRates(res, user) {
-  requireRole(user, [ROLES.ADMIN, ROLES.SHOP]);
-
-  const records = await getRecords(SHEETS.SHOP_RATES);
-
-  sendOk(res, records);
-}
-
-async function saveShopRates(req, res) {
-  requireRole(req, [ROLES.ADMIN]);
-  await ensureWorkbook();
-
-  const body = await parseBody(req);
-  requireFields(body, ["rates"]);
-  const records = (body.rates || []).map((rate) => ({
-    shop_id: rate.shop_id,
-    piece_name: rate.piece_name,
-    item_type: rate.item_type,
-    rate: toNumber(rate.rate)
-  }));
-
-  await appendRecordsBatch([
-    {
-      tabName: SHEETS.SHOP_RATES,
-      records
-    }
-  ]);
-
-  sendOk(res, {
-    message: "Shop rates saved"
-  });
-}
-
-async function handleShopRates(req, res) {
-  ensureMethod(req, ["GET", "POST"]);
-
-  const user = requireAuth(req);
-
-  if (req.method === "GET") {
-    return listShopRates(res, user);
-  }
-
-  return saveShopRates(req, res);
-}
-
-async function listKarigarRates(res, user) {
-  requireRole(user, [ROLES.ADMIN, ROLES.KARIGAR]);
-
-  const records = await getRecords(SHEETS.KARIGAR_RATES);
-
-  sendOk(res, records);
-}
-
-async function saveKarigarRates(req, res) {
-  requireRole(req, [ROLES.ADMIN]);
-  await ensureWorkbook();
-
-  const body = await parseBody(req);
-  requireFields(body, ["rates"]);
-  const records = (body.rates || []).map((rate) => ({
-    karigar_id: rate.karigar_id,
-    piece_name: rate.piece_name,
-    item_type: rate.item_type,
-    rate: toNumber(rate.rate)
-  }));
-
-  await appendRecordsBatch([
-    {
-      tabName: SHEETS.KARIGAR_RATES,
-      records
-    }
-  ]);
-
-  sendOk(res, {
-    message: "Karigar rates saved"
-  });
-}
-
-async function handleKarigarRates(req, res) {
-  ensureMethod(req, ["GET", "POST"]);
-
-  const user = requireAuth(req);
-
-  if (req.method === "GET") {
-    return listKarigarRates(res, user);
-  }
-
-  return saveKarigarRates(req, res);
-}
-
-// ============ SETTINGS HANDLERS ============
-
-async function listSettings(res, user) {
-  requireRole(user, [ROLES.ADMIN]);
-
-  const records = await getRecords(SHEETS.SETTINGS);
-
-  sendOk(res, records);
-}
-
-async function saveSettings(req, res) {
-  requireRole(req, [ROLES.ADMIN]);
-  await ensureWorkbook();
-
-  const body = await parseBody(req);
-  requireFields(body, ["key", "value"]);
-
-  const record = {
-    key: body.key,
-    value: body.value,
-    description: body.description || ""
-  };
-
-  const existing = await getRecords(SHEETS.SETTINGS);
-  const existingIndex = existing.findIndex(s => s.key === body.key);
-
-  if (existingIndex >= 0) {
-    await updateByField(SHEETS.SETTINGS, "key", body.key, record);
-  } else {
-    await appendRecord(SHEETS.SETTINGS, record);
-  }
-
-  sendOk(res, {
-    message: "Setting saved"
-  });
-}
-
-async function handleSettings(req, res) {
-  ensureMethod(req, ["GET", "POST"]);
-
-  const user = requireAuth(req);
-
-  if (req.method === "GET") {
-    return listSettings(res, user);
-  }
-
-  return saveSettings(req, res);
-}
-
-// ============ PIECES HANDLERS ============
-
-async function markPieceCut(req, res) {
-  const user = requireAuth(req);
-  requireRole(user, [ROLES.ADMIN, ROLES.CUTTING]);
-  await ensureWorkbook();
-
-  const body = await parseBody(req);
-  requireFields(body, ["piece_id"]);
-
-  const photoDataUrl = normalizeText(body.photo_data_url);
-  const photoUrl = normalizeText(body.photo_url);
-  if (!photoDataUrl && !photoUrl) {
-    const error = new Error("Either photo_data_url or photo_url is required");
-    error.statusCode = 400;
-    throw error;
-  }
-
-  const verificationSource = photoDataUrl || photoUrl;
-  console.log("[CUT] markPieceCut requested by:", user.username, "piece_id:", body.piece_id);
-
-  const allPieces = await getRecords(SHEETS.PIECES);
-  const piece = allPieces.find(p => p.piece_id === body.piece_id);
-
-  if (!piece) {
-    const error = new Error("Piece not found");
-    error.statusCode = 404;
-    throw error;
-  }
-
-  // 1. Verify with Gemini AI
-  if (piece.reference_slip_url) {
-    try {
-      await verifyWithGemini(piece.reference_slip_url, verificationSource);
-    } catch (err) {
-      if (err.statusCode === 400) {
-        throw err;
-      }
-      console.warn("[GEMINI WARNING] Verification fallback triggered, proceeding.", err.message);
-    }
-  }
-
-  // 2. Persist cutting photo URL (Cloudinary direct URL preferred, fallback uploads from data URL)
-  let cuttingPhotoUrl = photoUrl;
-  if (!cuttingPhotoUrl) {
-    const resolved = await resolvePhotoInput({
-      photoDataUrl,
-      folder: "cutting"
-    });
-    cuttingPhotoUrl = resolved.photoUrl;
-  }
-
-  const updates = {
-    cutting_done: true,
-    cutting_by: user.username,
-    cutting_date: nowISO(),
-    cutting_photo_url: cuttingPhotoUrl,
-    cutting_verified: true,
-    cutting_verified_date: nowISO()
-  };
-
-  await updateByField(SHEETS.PIECES, "piece_id", body.piece_id, updates);
-
-  sendOk(res, {
-    message: "Piece marked cut"
-  });
-}
-
-async function assignPiece(req, res) {
-  const user = requireAuth(req);
-  requireRole(user, [ROLES.ADMIN]);
-  await ensureWorkbook();
-
-  const body = await parseBody(req);
-  requireFields(body, ["piece_id", "karigar_id"]);
-
-  const updates = {
-    assigned_karigar_id: body.karigar_id,
-    assigned_date: nowISO(),
-    karigar_status: STATUS.KARIGAR.ASSIGNED,
-    designing_karigar_charge: toNumber(body.designing_karigar_charge || 0)
-  };
-
-  await updateByField(SHEETS.PIECES, "piece_id", body.piece_id, updates);
-
-  sendOk(res, {
-    message: "Work assigned"
-  });
-}
-
-async function completePiece(req, res) {
-  const user = requireAuth(req);
-  requireRole(user, [ROLES.ADMIN, ROLES.KARIGAR]);
-  await ensureWorkbook();
-
-  const body = await parseBody(req);
-  requireFields(body, ["piece_id"]);
-
-  const photoDataUrl = normalizeText(body.photo_data_url);
-  const photoUrl = normalizeText(body.photo_url);
-  if (!photoDataUrl && !photoUrl) {
-    const error = new Error("Either photo_data_url or photo_url is required");
-    error.statusCode = 400;
-    throw error;
-  }
-
-  let completionPhotoUrl = photoUrl;
-  if (!completionPhotoUrl) {
-    const resolved = await resolvePhotoInput({
-      photoDataUrl,
-      folder: "completion"
-    });
-    completionPhotoUrl = resolved.photoUrl;
-  }
-
-  const updates = {
-    karigar_status: STATUS.KARIGAR.COMPLETE,
-    karigar_complete_date: nowISO(),
-    completion_photo_url: completionPhotoUrl,
-    completion_verified: true,
-    completion_verified_date: nowISO()
-  };
-
-  await updateByField(SHEETS.PIECES, "piece_id", body.piece_id, updates);
-
-  sendOk(res, {
-    message: "Piece completed"
-  });
-}
-
-async function handlePieceCut(req, res) {
-  ensureMethod(req, ["POST"]);
-  return markPieceCut(req, res);
-}
-
-async function handlePieceAssign(req, res) {
-  ensureMethod(req, ["POST"]);
-  return assignPiece(req, res);
-}
-
-async function handlePieceComplete(req, res) {
-  ensureMethod(req, ["POST"]);
-  return completePiece(req, res);
-}
-
-// ============ ME HANDLERS ============
+// ============ ME & SNAPSHOT ============
 
 async function handleMe(req, res) {
   ensureMethod(req, ["GET"]);
   const user = requireAuth(req);
-
-  sendOk(res, {
-    user,
-    last_synced: new Date().toISOString()
-  });
+  sendOk(res, { user, last_synced: nowISO() });
 }
 
-// ============ SNAPSHOT HANDLERS ============
-
 function sanitizeSnapshot(snapshot) {
+  const stripMetaSafe = (arr) => (Array.isArray(arr) ? arr.map(stripMeta) : []);
   return {
     ...snapshot,
-    users: snapshot.users.map(stripMeta),
-    shops: snapshot.shops.map(stripMeta),
-    karigars: snapshot.karigars.map(stripMeta),
-    orders: snapshot.orders.map(stripMeta),
-    orderItems: snapshot.orderItems.map(stripMeta),
-    pieces: snapshot.pieces.map(stripMeta),
-    paymentsShops: snapshot.paymentsShops.map(stripMeta),
-    paymentsKarigar: snapshot.paymentsKarigar.map(stripMeta),
-    settings: snapshot.settings.map(stripMeta),
-    shopRates: snapshot.shopRates.map(stripMeta),
-    karigarRates: snapshot.karigarRates.map(stripMeta)
+    users: stripMetaSafe(snapshot.users),
+    shops: stripMetaSafe(snapshot.shops),
+    karigars: stripMetaSafe(snapshot.karigars),
+    orders: stripMetaSafe(snapshot.orders),
+    orderItems: stripMetaSafe(snapshot.orderItems),
+    pieces: stripMetaSafe(snapshot.pieces),
+    paymentsShops: stripMetaSafe(snapshot.paymentsShops),
+    paymentsKarigar: stripMetaSafe(snapshot.paymentsKarigar),
+    settings: stripMetaSafe(snapshot.settings),
+    products: stripMetaSafe(snapshot.products),
+    productSubProducts: stripMetaSafe(snapshot.productSubProducts),
+    shopInvoices: stripMetaSafe(snapshot.shopInvoices)
   };
 }
 
 async function handleSnapshot(req, res) {
   ensureMethod(req, ["GET"]);
   const user = requireAuth(req);
-  const env = getEnv();
-
   await ensureWorkbook();
   await refreshOrderStatuses();
-
   const snapshot = await loadFullSnapshot();
   const withComputed = withComputedFields(snapshot);
   const filtered = filterSnapshotByRole(user, withComputed);
-
-  sendOk(res, {
-    data: sanitizeSnapshot(filtered),
-    poll_interval_ms: env.pollIntervalMs,
-    last_synced: new Date().toISOString()
-  });
+  sendOk(res, { data: sanitizeSnapshot(filtered), last_synced: nowISO() });
 }
 
-// ============ ORDERS HANDLERS ============
+// ============ ORDERS ============
 
 async function handleOrders(req, res) {
   ensureMethod(req, ["GET", "POST", "PATCH"]);
-
   const user = requireAuth(req);
-
-  if (req.method === "GET") {
-    sendOk(res, {
-      orders: [],
-      last_synced: new Date().toISOString()
-    });
-    return;
-  }
-
+  if (req.method === "GET") return sendOk(res, { orders: [] });
   requireRole(req, [ROLES.ADMIN]);
   await ensureWorkbook();
-
   const body = await parseBody(req);
 
   if (req.method === "POST") {
-    requireFields(body, ["order_number", "shop_id", "delivery_date", "slip_photo_data_url", "items"]);
-
-    if (!Array.isArray(body.items) || body.items.length === 0) {
-      const error = new Error("Order items are required");
-      error.statusCode = 400;
-      throw error;
-    }
-
+    requireFields(body, ["order_number", "shop_id", "delivery_date", "items"]);
     const now = nowISO();
-    const photoResult = await resolvePhotoInput({
-      photoDataUrl: body.slip_photo_data_url,
-      folder: "slips"
-    });
-
+    let slipPhotoUrl = "";
+    if (body.slip_photo_data_url) {
+      const res = await resolvePhotoInput({ photoDataUrl: body.slip_photo_data_url, folder: "slips" });
+      slipPhotoUrl = res.photoUrl;
+    }
     const orderId = id("order");
     const orderRecord = {
       order_id: orderId,
       order_number: normalizeText(body.order_number),
       shop_id: normalizeText(body.shop_id),
       delivery_date: normalizeText(body.delivery_date),
-      designing_enabled: String(body.designing_enabled === true || normalizeKey(body.designing_enabled) === "true"),
+      designing_enabled: String(!!body.designing_enabled),
       designing_shop_charge: toNumber(body.designing_shop_charge),
-      slip_photo_url: photoResult.photoUrl,
+      slip_photo_url: slipPhotoUrl,
       status: STATUS.ORDER.PENDING,
+      is_archived: "FALSE",
+      billed_date: "",
       created_date: now,
       updated_date: now
     };
-
-    const itemRecords = [];
-    const pieceRecords = [];
-
-    for (const item of body.items) {
-      const itemId = id("item");
-      const itemType = normalizeText(item.item_type || "normal");
-      const pieceType = normalizeText(item.piece_type || "coat");
-      const measurementPhotoUrl = normalizeText(item.measurement_photo_url);
-
-      const itemRecord = {
-        item_id: itemId,
-        order_id: orderId,
-        item_type: itemType,
-        piece_type: pieceType,
-        status: "pending",
-        item_rate: toNumber(item.item_rate),
-        measurement_photo_url: measurementPhotoUrl
-      };
-
-      itemRecords.push(itemRecord);
-
-      const pieceNames = PIECE_EXPANSION[pieceType] || [pieceType];
-      for (const pieceName of pieceNames) {
-        const pieceRecord = {
-          piece_id: id("piece"),
-          item_id: itemId,
-          order_id: orderId,
-          piece_name: pieceName,
-          item_type: itemType,
-          cutting_done: false,
-          cutting_by: "",
-          cutting_date: "",
-          assigned_karigar_id: "",
-          assigned_date: "",
-          karigar_status: STATUS.KARIGAR.NOT_ASSIGNED,
-          karigar_complete_date: "",
-          measurement_photo_url: measurementPhotoUrl,
-          reference_slip_url: photoResult.photoUrl,
-          cutting_photo_url: "",
-          cutting_verified: false,
-          cutting_verified_date: "",
-          completion_photo_url: "",
-          completion_verified: false,
-          completion_verified_date: "",
-          designing_karigar_charge: 0,
-          shop_rate: 0,
-          karigar_rate: 0,
-          bundle_piece_type: pieceType,
-          created_date: now,
-          updated_date: now
-        };
-
-        pieceRecords.push(pieceRecord);
-      }
-    }
-
-    await appendRecordsBatch([
-      {
-        tabName: SHEETS.ORDERS,
-        records: [orderRecord]
-      },
-      {
-        tabName: SHEETS.ORDER_ITEMS,
-        records: itemRecords
-      },
-      {
-        tabName: SHEETS.PIECES,
-        records: pieceRecords
-      }
-    ]);
-
-    sendOk(res, {
-      message: "Order created",
-      order: orderRecord
-    });
-    return;
+    const items = body.items.map(i => ({
+      item_id: id("item"),
+      order_id: orderId,
+      item_type: normalizeText(i.item_type || "normal"),
+      piece_type: normalizeText(i.piece_type || "coat"),
+      status: "pending",
+      item_rate: toNumber(i.item_rate),
+      measurement_photo_url: normalizeText(i.measurement_photo_url || "")
+    }));
+    await appendRecordsBatch([{ tabName: SHEETS.ORDERS, records: [orderRecord] }, { tabName: SHEETS.ORDER_ITEMS, records: items }]);
+    return sendOk(res, { message: "Order created", order: orderRecord });
   }
 
   requireFields(body, ["order_id"]);
-
-  const patch = {};
-  if (body.status !== undefined) patch.status = normalizeText(body.status);
-  if (body.delivery_date !== undefined) patch.delivery_date = normalizeText(body.delivery_date);
-  if (body.designing_enabled !== undefined)
-    patch.designing_enabled = String(body.designing_enabled === true || normalizeKey(body.designing_enabled) === "true");
-  if (body.designing_shop_charge !== undefined)
-    patch.designing_shop_charge = toNumber(body.designing_shop_charge);
-
-  if (!Object.keys(patch).length) {
-    const error = new Error("No updatable fields provided");
-    error.statusCode = 400;
-    throw error;
-  }
-
-  patch.updated_date = nowISO();
-
+  const patch = { ...body, updated_date: nowISO() };
+  if (patch.is_archived) patch.is_archived = String(patch.is_archived).toUpperCase();
   const updated = await updateByField(SHEETS.ORDERS, "order_id", body.order_id, patch);
-
-  sendOk(res, {
-    message: "Order updated",
-    order: updated
-  });
+  sendOk(res, { message: "Order updated", order: updated });
 }
+
+async function extractOrder(req, res) {
+  requireRole(req, [ROLES.ADMIN]);
+  await ensureWorkbook();
+  const body = await parseBody(req);
+  requireFields(body, ["order_id"]);
+  const snapshot = await loadFullSnapshot();
+  const order = snapshot.orders.find(o => o.order_id === body.order_id);
+  if (!order) throw new Error("Order not found");
+  const items = snapshot.orderItems.filter(i => i.order_id === body.order_id);
+  const now = nowISO();
+  const pieces = [];
+  for (const item of items) {
+    const product = snapshot.products.find(p => normalizeKey(p.product_name) === normalizeKey(item.piece_type));
+    if (!product) continue;
+    const subs = snapshot.productSubProducts.filter(s => s.product_id === product.product_id);
+    for (const sub of subs) {
+      pieces.push({
+        piece_id: id("piece"),
+        item_id: item.item_id,
+        order_id: body.order_id,
+        piece_name: sub.sub_product_name,
+        sub_product_name: sub.sub_product_name,
+        item_type: item.item_type,
+        cutting_done: "FALSE",
+        karigar_status: STATUS.KARIGAR.NOT_ASSIGNED,
+        measurement_photo_url: item.measurement_photo_url,
+        reference_slip_url: order.slip_photo_url,
+        shop_rate: toNumber(product.shop_rate),
+        karigar_rate: toNumber(sub.worker_rate),
+        is_synced: "FALSE",
+        bundle_piece_type: item.piece_type,
+        created_date: now,
+        updated_date: now
+      });
+    }
+  }
+  if (pieces.length) await appendRecords(SHEETS.PIECES, pieces);
+  sendOk(res, { message: `${pieces.length} pieces extracted` });
+}
+
+// ============ WORKFLOW ============
+
+async function markPieceCut(req, res) {
+  const user = requireAuth(req);
+  requireRole(user, [ROLES.ADMIN, ROLES.CUTTING]);
+  await ensureWorkbook();
+  const body = await parseBody(req);
+  requireFields(body, ["piece_id"]);
+  const updates = { cutting_done: "TRUE", cutting_by: user.username, cutting_date: nowISO(), cutting_verified: "TRUE", cutting_verified_date: nowISO() };
+  if (body.photo_data_url) {
+    const res = await resolvePhotoInput({ photoDataUrl: body.photo_data_url, folder: "cutting" });
+    updates.cutting_photo_url = res.photoUrl;
+  }
+  await updateByField(SHEETS.PIECES, "piece_id", body.piece_id, updates);
+  sendOk(res, { message: "Piece cut" });
+}
+
+async function assignPiece(req, res) {
+  requireRole(req, [ROLES.ADMIN]);
+  await ensureWorkbook();
+  const body = await parseBody(req);
+  requireFields(body, ["piece_id", "karigar_id"]);
+  const updates = { assigned_karigar_id: body.karigar_id, assigned_date: nowISO(), karigar_status: STATUS.KARIGAR.ASSIGNED, designing_karigar_charge: toNumber(body.designing_karigar_charge || 0) };
+  await updateByField(SHEETS.PIECES, "piece_id", body.piece_id, updates);
+  sendOk(res, { message: "Work assigned" });
+}
+
+async function requestApproval(req, res) {
+  const user = requireAuth(req);
+  requireRole(user, [ROLES.ADMIN, ROLES.KARIGAR]);
+  await ensureWorkbook();
+  const body = await parseBody(req);
+  requireFields(body, ["piece_id"]);
+  const updates = { karigar_status: STATUS.KARIGAR.PENDING_APPROVAL, karigar_complete_date: nowISO(), updated_date: nowISO() };
+  if (body.photo_data_url) {
+    const res = await resolvePhotoInput({ photoDataUrl: body.photo_data_url, folder: "completion" });
+    updates.completion_photo_url = res.photoUrl;
+  }
+  await updateByField(SHEETS.PIECES, "piece_id", body.piece_id, updates);
+  sendOk(res, { message: "Approval requested" });
+}
+
+async function approvePiece(req, res) {
+  requireRole(req, [ROLES.ADMIN]);
+  await ensureWorkbook();
+  const body = await parseBody(req);
+  requireFields(body, ["piece_id"]);
+  const updates = { karigar_status: STATUS.KARIGAR.COMPLETE, completion_verified: "TRUE", completion_verified_date: nowISO(), updated_date: nowISO() };
+  await updateByField(SHEETS.PIECES, "piece_id", body.piece_id, updates);
+  sendOk(res, { message: "Piece approved" });
+}
+
+async function syncPayroll(req, res) {
+  requireRole(req, [ROLES.ADMIN]);
+  await ensureWorkbook();
+  const syncId = id("sync");
+  const pieces = await getRecords(SHEETS.PIECES);
+  const toSync = pieces.filter(p => normalizeKey(p.karigar_status) === STATUS.KARIGAR.COMPLETE && normalizeKey(p.is_synced) !== "true");
+  if (!toSync.length) return sendOk(res, { message: "No pieces to sync" });
+  const updates = toSync.map(p => ({ rowNumber: p.__rowNumber, record: { ...p, is_synced: "TRUE", sync_id: syncId, updated_date: nowISO() } }));
+  await updateMany(SHEETS.PIECES, updates);
+  sendOk(res, { message: `${toSync.length} pieces synced`, sync_id: syncId });
+}
+
+async function generateInvoice(req, res) {
+  requireRole(req, [ROLES.ADMIN]);
+  await ensureWorkbook();
+  const body = await parseBody(req);
+  requireFields(body, ["shop_id", "order_ids", "total_amount"]);
+  const now = nowISO();
+  const orders = await getRecords(SHEETS.ORDERS);
+  const targetIds = new Set(body.order_ids);
+  const orderUpdates = orders.filter(o => targetIds.has(o.order_id)).map(o => ({ rowNumber: o.__rowNumber, record: { ...o, is_archived: "TRUE", billed_date: now, updated_date: now } }));
+  if (orderUpdates.length) await updateMany(SHEETS.ORDERS, orderUpdates);
+  await appendRecord(SHEETS.SHOP_INVOICES, { invoice_id: id("inv"), shop_id: body.shop_id, total_amount: toNumber(body.total_amount), generated_date: now, order_ids: body.order_ids.join(",") });
+  sendOk(res, { message: "Invoice generated" });
+}
+
+// ============ PRODUCTS ============
+
+async function handleProducts(req, res) {
+  ensureMethod(req, ["GET", "POST", "DELETE"]);
+  const user = requireAuth(req);
+  if (req.method === "GET") return sendOk(res, await getRecords(SHEETS.PRODUCTS));
+  requireRole(user, [ROLES.ADMIN]);
+  const body = await parseBody(req);
+  if (req.method === "POST") {
+    const record = { product_id: body.product_id || id("prod"), product_name: normalizeText(body.product_name), shop_name: normalizeText(body.shop_name), shop_rate: toNumber(body.shop_rate) };
+    await appendRecord(SHEETS.PRODUCTS, record);
+    return sendOk(res, { message: "Product saved", record });
+  }
+}
+
+async function handleProductSubProducts(req, res) {
+  ensureMethod(req, ["GET", "POST"]);
+  const user = requireAuth(req);
+  if (req.method === "GET") return sendOk(res, await getRecords(SHEETS.PRODUCT_SUB_PRODUCTS));
+  requireRole(user, [ROLES.ADMIN]);
+  const body = await parseBody(req);
+  if (req.method === "POST") {
+    const record = { sub_id: id("sub"), product_id: body.product_id, sub_product_name: normalizeText(body.sub_product_name), worker_rate: toNumber(body.worker_rate) };
+    await appendRecord(SHEETS.PRODUCT_SUB_PRODUCTS, record);
+    return sendOk(res, { message: "Sub-product saved", record });
+  }
+}
+
+// ============ SHOPS, KARIGAR, USERS, PAYMENTS ============
 
 async function handleShops(req, res) {
   ensureMethod(req, ["GET", "POST", "PATCH"]);
-
   const user = requireAuth(req);
-
-  if (req.method === "GET") {
-    return listShops(res, user);
-  }
-
+  if (req.method === "GET") return listShops(res, user);
+  requireRole(user, [ROLES.ADMIN]);
+  const body = await parseBody(req);
   if (req.method === "POST") {
-    return createShop(req, res);
+    const record = { shop_id: id("shop"), shop_name: normalizeText(body.shop_name), contact: normalizeText(body.contact || ""), created_date: nowISO() };
+    await appendRecord(SHEETS.SHOPS, record);
+    return sendOk(res, { message: "Shop created", record });
   }
-
-  return updateShop(req, res);
-}
-
-// ============ KARIGAR HANDLERS ============
-
-async function listKarigar(res, user) {
-  requireRole(user, [ROLES.ADMIN, ROLES.CUTTING]);
-
-  const records = await getRecords(SHEETS.KARIGAR);
-
-  sendOk(res, records);
-}
-
-async function createKarigar(req, res) {
-  requireRole(req, [ROLES.ADMIN]);
-  await ensureWorkbook();
-
-  const body = await parseBody(req);
-  requireFields(body, ["name"]);
-
-  const karigarId = normalizeText(body.karigar_id) || id("karigar");
-
-  const existing = await getRecords(SHEETS.KARIGAR);
-  if (existing.some((karigar) => karigar.karigar_id === karigarId)) {
-    const error = new Error("karigar_id already exists");
-    error.statusCode = 400;
-    throw error;
-  }
-
-  const now = nowISO();
-  const record = {
-    karigar_id: karigarId,
-    name: normalizeText(body.name),
-    contact: normalizeText(body.contact),
-    created_date: now
-  };
-
-  await appendRecord(SHEETS.KARIGAR, record);
-
-  sendOk(res, {
-    message: "Karigar created",
-    karigar: record
-  });
-}
-
-async function updateKarigar(req, res) {
-  requireRole(req, [ROLES.ADMIN]);
-  await ensureWorkbook();
-
-  const body = await parseBody(req);
-  requireFields(body, ["karigar_id"]);
-
-  const patch = {};
-  if (body.name !== undefined) patch.name = normalizeText(body.name);
-  if (body.contact !== undefined) patch.contact = normalizeText(body.contact);
-
-  if (!Object.keys(patch).length) {
-    const error = new Error("No updatable fields provided");
-    error.statusCode = 400;
-    throw error;
-  }
-
-  const updated = await updateByField(SHEETS.KARIGAR, "karigar_id", body.karigar_id, patch);
-
-  sendOk(res, {
-    message: "Karigar updated",
-    karigar: stripMeta(updated)
-  });
+  const updated = await updateByField(SHEETS.SHOPS, "shop_id", body.shop_id, { ...body });
+  sendOk(res, { message: "Shop updated", record: updated });
 }
 
 async function handleKarigar(req, res) {
   ensureMethod(req, ["GET", "POST", "PATCH"]);
-
   const user = requireAuth(req);
-
-  if (req.method === "GET") {
-    return listKarigar(res, user);
-  }
-
-  if (req.method === "POST") {
-    return createKarigar(req, res);
-  }
-
-  return updateKarigar(req, res);
-}
-
-// ============ USERS HANDLERS ============
-
-async function listUsers(res, user) {
+  if (req.method === "GET") return sendOk(res, await getRecords(SHEETS.KARIGAR));
   requireRole(user, [ROLES.ADMIN]);
-
-  const records = await getRecords(SHEETS.USERS);
-
-  sendOk(res, records.map(stripMeta));
-}
-
-async function createUser(req, res) {
-  requireRole(req, [ROLES.ADMIN]);
-  await ensureWorkbook();
-
   const body = await parseBody(req);
-  requireFields(body, ["username", "password", "role", "display_name"]);
-
-  const username = normalizeText(body.username);
-
-  const existing = await getRecords(SHEETS.USERS);
-  if (existing.some((user) => normalizeKey(user.username) === normalizeKey(username))) {
-    const error = new Error("username already exists");
-    error.statusCode = 400;
-    throw error;
+  if (req.method === "POST") {
+    const record = { karigar_id: id("karigar"), name: normalizeText(body.name), contact: normalizeText(body.contact || ""), skills: normalizeText(body.skills || ""), created_date: nowISO() };
+    await appendRecord(SHEETS.KARIGAR, record);
+    return sendOk(res, { message: "Karigar created", record });
   }
-
-  const record = {
-    username,
-    password: body.password,
-    role: body.role,
-    display_name: normalizeText(body.display_name),
-    entity_id: body.entity_id || ""
-  };
-
-  await appendRecord(SHEETS.USERS, record);
-
-  sendOk(res, {
-    message: "User created",
-    user: stripPrivateUser(record)
-  });
-}
-
-async function updateUser(req, res) {
-  requireRole(req, [ROLES.ADMIN]);
-  await ensureWorkbook();
-
-  const body = await parseBody(req);
-  requireFields(body, ["username"]);
-
-  const patch = {};
-  if (body.new_username !== undefined) patch.username = normalizeText(body.new_username);
-  if (body.password !== undefined) patch.password = body.password;
-  if (body.role !== undefined) patch.role = body.role;
-  if (body.display_name !== undefined) patch.display_name = normalizeText(body.display_name);
-  if (body.entity_id !== undefined) patch.entity_id = body.entity_id;
-
-  if (!Object.keys(patch).length) {
-    const error = new Error("No updatable fields provided");
-    error.statusCode = 400;
-    throw error;
-  }
-
-  const updated = await updateByField(SHEETS.USERS, "username", body.username, patch);
-
-  sendOk(res, {
-    message: "User updated",
-    user: stripPrivateUser(stripMeta(updated))
-  });
-}
-
-async function deleteUser(req, res) {
-  requireRole(req, [ROLES.ADMIN]);
-  await ensureWorkbook();
-
-  const body = await parseBody(req);
-  requireFields(body, ["username"]);
-
-  const updated = await updateByField(SHEETS.USERS, "username", body.username, { role: "deleted" });
-
-  sendOk(res, {
-    message: "User deleted"
-  });
+  const updated = await updateByField(SHEETS.KARIGAR, "karigar_id", body.karigar_id, { ...body });
+  sendOk(res, { message: "Karigar updated", record: updated });
 }
 
 async function handleUsers(req, res) {
   ensureMethod(req, ["GET", "POST", "PATCH", "DELETE"]);
-
   const user = requireAuth(req);
-
-  if (req.method === "GET") {
-    return listUsers(res, user);
-  }
-
+  if (req.method === "GET") return sendOk(res, (await getRecords(SHEETS.USERS)).map(stripMeta));
+  requireRole(user, [ROLES.ADMIN]);
+  const body = await parseBody(req);
   if (req.method === "POST") {
-    return createUser(req, res);
+    const hashed = await bcrypt.hash(String(body.password), 10);
+    const record = { username: normalizeText(body.username), password: hashed, role: body.role, display_name: normalizeText(body.display_name), entity_id: body.entity_id || "" };
+    await appendRecord(SHEETS.USERS, record);
+    return sendOk(res, { message: "User created", user: stripPrivateUser(record) });
   }
-
-  if (req.method === "PATCH") {
-    return updateUser(req, res);
+  if (req.method === "DELETE") {
+    await updateByField(SHEETS.USERS, "username", body.username, { role: "deleted" });
+    return sendOk(res, { message: "User deleted" });
   }
+  const patch = { ...body };
+  if (patch.password) patch.password = await bcrypt.hash(String(patch.password), 10);
+  const updated = await updateByField(SHEETS.USERS, "username", body.username, patch);
+  sendOk(res, { message: "User updated", user: stripPrivateUser(updated) });
+}
 
-  return deleteUser(req, res);
+async function handlePaymentsShops(req, res) {
+  ensureMethod(req, ["GET", "POST"]);
+  const user = requireAuth(req);
+  if (req.method === "GET") return sendOk(res, await getRecords(SHEETS.PAYMENTS_SHOPS));
+  requireRole(user, [ROLES.ADMIN]);
+  const body = await parseBody(req);
+  const record = { payment_id: id("pay"), shop_id: body.shop_id, amount: toNumber(body.amount), payment_date: body.payment_date, note: body.note || "", recorded_by: user.username };
+  await appendRecord(SHEETS.PAYMENTS_SHOPS, record);
+  sendOk(res, { message: "Payment recorded", record });
+}
+
+async function handlePaymentsKarigar(req, res) {
+  ensureMethod(req, ["GET", "POST"]);
+  const user = requireAuth(req);
+  if (req.method === "GET") return sendOk(res, await getRecords(SHEETS.PAYMENTS_KARIGAR));
+  requireRole(user, [ROLES.ADMIN]);
+  const body = await parseBody(req);
+  const record = { payment_id: id("pay"), karigar_id: body.karigar_id, amount: toNumber(body.amount), payment_date: body.payment_date, note: body.note || "", recorded_by: user.username };
+  await appendRecord(SHEETS.PAYMENTS_KARIGAR, record);
+  sendOk(res, { message: "Payment recorded", record });
+}
+
+async function handleSettings(req, res) {
+  ensureMethod(req, ["GET", "POST"]);
+  const user = requireAuth(req);
+  if (req.method === "GET") return sendOk(res, await getRecords(SHEETS.SETTINGS));
+  requireRole(user, [ROLES.ADMIN]);
+  const body = await parseBody(req);
+  await updateByField(SHEETS.SETTINGS, "key", body.key, body);
+  sendOk(res, { message: "Setting updated" });
 }
 
 // ============ ROUTER ============
-
-function sendJson(res, status, body) {
-  res.statusCode = status;
-  res.setHeader("Content-Type", "application/json");
-  res.end(JSON.stringify(body));
-}
 
 const handlers = {
   bootstrap: withErrorHandler(handleBootstrap),
@@ -1221,19 +433,24 @@ const handlers = {
   listOrders: withErrorHandler(async (req, res) => { req.method = 'GET'; return handleOrders(req, res); }),
   createOrder: withErrorHandler(async (req, res) => { req.method = 'POST'; return handleOrders(req, res); }),
   updateOrder: withErrorHandler(async (req, res) => { req.method = 'PATCH'; return handleOrders(req, res); }),
-  markPieceCut: withErrorHandler(handlePieceCut),
-  assignPiece: withErrorHandler(handlePieceAssign),
-  completePiece: withErrorHandler(handlePieceComplete),
+  extractOrder: withErrorHandler(extractOrder),
+  requestApproval: withErrorHandler(requestApproval),
+  approvePiece: withErrorHandler(approvePiece),
+  syncPayroll: withErrorHandler(syncPayroll),
+  generateInvoice: withErrorHandler(generateInvoice),
+  markPieceCut: withErrorHandler(markPieceCut),
+  assignPiece: withErrorHandler(assignPiece),
+  completePiece: withErrorHandler(requestApproval),
   listShops: withErrorHandler(async (req, res) => { req.method = 'GET'; return handleShops(req, res); }),
   createShop: withErrorHandler(async (req, res) => { req.method = 'POST'; return handleShops(req, res); }),
   updateShop: withErrorHandler(async (req, res) => { req.method = 'PATCH'; return handleShops(req, res); }),
   listKarigar: withErrorHandler(async (req, res) => { req.method = 'GET'; return handleKarigar(req, res); }),
   createKarigar: withErrorHandler(async (req, res) => { req.method = 'POST'; return handleKarigar(req, res); }),
   updateKarigar: withErrorHandler(async (req, res) => { req.method = 'PATCH'; return handleKarigar(req, res); }),
-  listShopRates: withErrorHandler(async (req, res) => { req.method = 'GET'; return handleShopRates(req, res); }),
-  saveShopRates: withErrorHandler(async (req, res) => { req.method = 'POST'; return handleShopRates(req, res); }),
-  listKarigarRates: withErrorHandler(async (req, res) => { req.method = 'GET'; return handleKarigarRates(req, res); }),
-  saveKarigarRates: withErrorHandler(async (req, res) => { req.method = 'POST'; return handleKarigarRates(req, res); }),
+  listProducts: withErrorHandler(async (req, res) => { req.method = 'GET'; return handleProducts(req, res); }),
+  saveProduct: withErrorHandler(async (req, res) => { req.method = 'POST'; return handleProducts(req, res); }),
+  listSubProducts: withErrorHandler(async (req, res) => { req.method = 'GET'; return handleProductSubProducts(req, res); }),
+  saveSubProduct: withErrorHandler(async (req, res) => { req.method = 'POST'; return handleProductSubProducts(req, res); }),
   listShopPayments: withErrorHandler(async (req, res) => { req.method = 'GET'; return handlePaymentsShops(req, res); }),
   createShopPayment: withErrorHandler(async (req, res) => { req.method = 'POST'; return handlePaymentsShops(req, res); }),
   listKarigarPayments: withErrorHandler(async (req, res) => { req.method = 'GET'; return handlePaymentsKarigar(req, res); }),
@@ -1250,33 +467,12 @@ module.exports = async function (req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PATCH, DELETE");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-
-  if (req.method === "OPTIONS") {
-    res.statusCode = 200;
-    return res.end();
-  }
-
+  if (req.method === "OPTIONS") { res.statusCode = 200; return res.end(); }
   const url = new URL(req.url || "/", "http://localhost");
   const action = url.searchParams.get("action");
-  console.log("[API ROUTER]", req.method, "action:", action, "url:", req.url);
-
-  if (!action || !handlers[action]) {
-    console.error("[API ROUTER] Unknown action", action, req.method, req.url);
-    return sendJSON(res, 404, {
-      ok: false,
-      message: `Not found: ${action || "<none>"}`
-    });
-  }
-
-  try {
-    return await handlers[action](req, res);
-  } catch (error) {
-    console.error("[API ROUTER ERROR]", req.method, req.url, error);
-    const payload = {
-      ok: false,
-      message: error.message || "Server error"
-    };
-    if (process.env.NODE_ENV !== "production") payload.stack = error.stack;
-    return sendJSON(res, error.statusCode || 500, payload);
+  if (!action || !handlers[action]) return sendJSON(res, 404, { ok: false, message: `Not found: ${action || "<none>"}` });
+  try { return await handlers[action](req, res); } catch (error) {
+    console.error("[API ERROR]", action, error);
+    return sendJSON(res, error.statusCode || 500, { ok: false, message: error.message || "Server error" });
   }
 };
