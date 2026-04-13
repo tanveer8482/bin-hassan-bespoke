@@ -1,4 +1,4 @@
-﻿
+
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, TOKEN_KEY, USER_KEY } from "./lib/api";
 import { emptySnapshot } from "./lib/emptySnapshot";
@@ -256,13 +256,24 @@ export default function App() {
         runAction(
           `cut:${payload.piece_id}`,
           async () => {
-            const currentToken = window.localStorage.getItem(TOKEN_KEY) || "";
-            console.log("MARK_PIECE_CUT ATTEMPT - Token found in localStorage:", currentToken ? "YES" : "NO");
-            console.log("Token value prefix:", currentToken ? currentToken.substring(0, 10) + "..." : "NONE");
+            const currentToken = window.localStorage.getItem(TOKEN_KEY) || token;
             return api.markPieceCut(currentToken, payload);
           },
           "Piece marked cut"
         ),
+      extractOrder: (payload) =>
+        runAction(`extract:${payload.order_id}`, () => api.extractOrder(token, payload), "Pieces extracted"),
+      approvePiece: (payload) =>
+        runAction(`approve:${payload.piece_id}`, () => api.approvePiece(token, payload), "Piece approved"),
+      syncPayroll: (payload) =>
+        runAction("syncPayroll", () => api.syncPayroll(token, payload), "Payroll synced"),
+      generateInvoice: (payload) =>
+        runAction("generateInvoice", () => api.generateInvoice(token, payload), "Invoice generated"),
+      saveProduct: (payload) =>
+        runAction("saveProduct", () => api.saveProduct(token, payload), "Product saved"),
+      saveSubProduct: (payload) =>
+        runAction("saveSubProduct", () => api.saveSubProduct(token, payload), "Sub-product saved"),
+
       assignPiece: (payload) =>
         runAction(
           `assign:${payload.piece_id}`,
@@ -277,9 +288,9 @@ export default function App() {
           `complete:${payload.piece_id}`,
           async () => {
             const currentToken = window.localStorage.getItem(TOKEN_KEY) || token;
-            return api.completePiece(currentToken, payload);
+            return api.requestApproval(currentToken, payload);
           },
-          "Piece completed"
+          "Request Submitted"
         ),
 
       createShop: (payload) =>
