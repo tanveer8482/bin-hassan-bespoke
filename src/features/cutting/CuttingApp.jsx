@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { byId, formatDate } from "../../lib/format";
+import { byId, formatDate, normalizeBool } from "../../lib/format";
 import { preparePhotoPayloadForApi } from "../../lib/api";
 
 export function CuttingApp({ data, onUploadCuttingPhoto, busyAction }) {
@@ -12,7 +12,7 @@ export function CuttingApp({ data, onUploadCuttingPhoto, busyAction }) {
   const shopsById = useMemo(() => byId(data.shops, "shop_id"), [data.shops]);
 
   const pendingPieces = useMemo(() => {
-    const rawPending = data.pieces.filter((piece) => String(piece.cutting_done) !== "true");
+    const rawPending = data.pieces.filter((piece) => !normalizeBool(piece.cutting_done));
     const grouped = new Map();
 
     rawPending.forEach((piece) => {
