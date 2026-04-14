@@ -726,11 +726,6 @@ export function AdminApp({ data, actions, busyAction }) {
                 <p className="muted">No orders due today.</p>
               ) : null}
             </div>
-          </div>
-        </section>
-      ) : null}
-            </div>
-
             <div className="panel inset">
               <h3>Overdue Orders</h3>
               {dueSummary.overdue.map((order) => (
