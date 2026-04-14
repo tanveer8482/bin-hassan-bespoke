@@ -42,7 +42,8 @@ function debounce(func, wait) {
 
 function emptyOrderItem() {
   return {
-    piece_type: "coat",
+    product_id: "",
+    piece_type: "",
     item_type: "normal",
     measurement_photo_url: "",
     item_rate: ""
@@ -383,10 +384,14 @@ export function AdminApp({ data, actions, busyAction }) {
       designing_shop_charge: orderForm.designing_enabled
         ? number(orderForm.designing_shop_charge)
         : 0,
-      items: orderForm.items.map((item) => ({
-        ...item,
-        item_rate: item.item_rate === "" ? undefined : number(item.item_rate)
-      }))
+      items: orderForm.items.map((item) => {
+        const product = data.products.find((p) => p.product_id === item.product_id);
+        return {
+          ...item,
+          piece_type: product?.product_name || item.piece_type || "",
+          item_rate: item.item_rate === "" ? undefined : number(item.item_rate)
+        };
+      })
     };
 
     const ok = await actions.createOrder(payload);
@@ -987,13 +992,13 @@ export function AdminApp({ data, actions, busyAction }) {
                 Product Configuration
                 <select
                   className="input"
-                  value={item.piece_type}
-                  onChange={(event) => updateOrderItem(index, "piece_type", event.target.value)}
+                  value={item.product_id}
+                  onChange={(event) => updateOrderItem(index, "product_id", event.target.value)}
                   required
                 >
                   <option value="">Select Product Configuration</option>
                   {data.products.map((p) => (
-                    <option key={p.product_id} value={p.product_name}>
+                    <option key={p.product_id} value={p.product_id}>
                       {p.product_name} ({p.shop_name})
                     </option>
                   ))}

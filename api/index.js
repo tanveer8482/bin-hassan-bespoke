@@ -181,6 +181,7 @@ async function handleOrders(req, res) {
     const items = body.items.map(i => ({
       item_id: id("item"),
       order_id: orderId,
+      product_id: normalizeText(i.product_id || ""),
       item_type: normalizeText(i.item_type || "normal"),
       piece_type: normalizeText(i.piece_type || "coat"),
       status: "pending",
@@ -210,7 +211,9 @@ async function extractOrder(req, res) {
   const now = nowISO();
   const pieces = [];
   for (const item of items) {
-    const product = snapshot.products.find(p => normalizeKey(p.product_name) === normalizeKey(item.piece_type));
+    const product =
+      snapshot.products.find(p => p.product_id === item.product_id) ||
+      snapshot.products.find(p => normalizeKey(p.product_name) === normalizeKey(item.piece_type));
     if (!product) continue;
     const subs = snapshot.productSubProducts.filter(s => s.product_id === product.product_id);
     for (const sub of subs) {
@@ -228,7 +231,7 @@ async function extractOrder(req, res) {
         shop_rate: toNumber(product.shop_rate),
         karigar_rate: toNumber(sub.worker_rate),
         is_synced: "FALSE",
-        bundle_piece_type: item.piece_type,
+        bundle_piece_type: product.product_name || item.piece_type,
         created_date: now,
         updated_date: now
       });
