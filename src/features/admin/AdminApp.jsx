@@ -904,9 +904,8 @@ export function AdminApp({ data, actions, busyAction }) {
                   accept="image/*"
                   capture="environment"
                   onChange={(event) => selectSlipPhoto(event.target.files?.[0])}
-                  required={!orderForm.slip_photo_data_url}
                 />
-                <span>{orderForm.slip_photo_name || "Upload Measurement Slip Photo"}</span>
+                <span>{orderForm.slip_photo_name || "Upload Measurement Slip Photo (Optional)"}</span>
               </label>
 
               {orderForm.slip_photo_data_url ? (
@@ -917,7 +916,7 @@ export function AdminApp({ data, actions, busyAction }) {
                 />
               ) : (
                 <p className="muted">
-                  Slip photo is required. This is used as the verification reference.
+                  Slip photo is optional. You can submit the order without uploading an image.
                 </p>
               )}
             </div>
