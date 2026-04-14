@@ -514,6 +514,32 @@ export function AdminApp({ data, actions, busyAction }) {
     }
   };
 
+  const submitProduct = async (event) => {
+    event.preventDefault();
+    const payload = {
+      product_name: productForm.product_name,
+      shop_name: productForm.shop_name,
+      shop_rate: number(productForm.shop_rate)
+    };
+    const ok = await actions.saveProduct(payload);
+    if (ok) {
+      setProductForm({ product_name: "", shop_name: "", shop_rate: "" });
+    }
+  };
+
+  const submitSubProduct = async (event) => {
+    event.preventDefault();
+    const payload = {
+      product_id: subProductForm.product_id,
+      sub_product_name: subProductForm.sub_product_name,
+      worker_rate: number(subProductForm.worker_rate)
+    };
+    const ok = await actions.saveSubProduct(payload);
+    if (ok) {
+      setSubProductForm({ product_id: "", sub_product_name: "", worker_rate: "" });
+    }
+  };
+
   const submitShop = async (event) => {
     event.preventDefault();
     const ok = await actions.createShop(shopForm);
