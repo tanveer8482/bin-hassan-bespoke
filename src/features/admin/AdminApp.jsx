@@ -1189,11 +1189,12 @@ export function AdminApp({ data, actions, busyAction }) {
           <div className="cards-grid">
             {pendingCutPieces.map((piece) => {
               const order = data.orders.find((entry) => entry.order_id === piece.order_id);
+              const displayName = piece.bundle_piece_type || piece.piece_name;
 
               return (
                 <article className="card" key={piece.piece_id}>
                   <p>
-                    <strong>{piece.piece_name}</strong> - {piece.item_type}
+                    <strong>{displayName}</strong> - {piece.item_type}
                   </p>
                   <p className="muted">Order: {order?.order_number || "-"}</p>
                   <p className="muted">
@@ -1207,18 +1208,28 @@ export function AdminApp({ data, actions, busyAction }) {
                       <img src={piece.reference_slip_url} alt="Reference slip" className="slip-thumb" />
                     </a>
                   ) : null}
-                  <label className="file-upload">
-                    <input
-                      type="file"
-                      accept="image/*"
-                      capture="environment"
-                      onChange={(event) => uploadCuttingPhoto(piece.piece_id, event.target.files?.[0])}
+                  {piece.reference_slip_url ? (
+                    <label className="file-upload">
+                      <input
+                        type="file"
+                        accept="image/*"
+                        capture="environment"
+                        onChange={(event) => uploadCuttingPhoto(piece.piece_id, event.target.files?.[0])}
+                        disabled={busyAction === `cut:${piece.piece_id}`}
+                      />
+                      <span>
+                        {busyAction === `cut:${piece.piece_id}` ? "Uploading..." : "Upload Cutting Photo"}
+                      </span>
+                    </label>
+                  ) : (
+                    <button
+                      className="button primary small"
+                      onClick={() => actions.markPieceCut({ piece_id: piece.piece_id })}
                       disabled={busyAction === `cut:${piece.piece_id}`}
-                    />
-                    <span>
-                      {busyAction === `cut:${piece.piece_id}` ? "Uploading..." : "Upload Cutting Photo"}
-                    </span>
-                  </label>
+                    >
+                      Mark Cut
+                    </button>
+                  )}
                 </article>
               );
             })}

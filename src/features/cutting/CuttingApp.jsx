@@ -78,12 +78,13 @@ export function CuttingApp({ data, onUploadCuttingPhoto, busyAction }) {
           {pendingPieces.map((piece) => {
             const order = ordersById[piece.order_id] || {};
             const shop = shopsById[order.shop_id] || {};
+            const displayName = piece.bundle_piece_type || piece.piece_name;
 
             return (
               <article className="card" key={piece.piece_id}>
                 <div>
                   <p className="muted">Order #{order.order_number || "-"}</p>
-                  <h3>{piece.piece_name}</h3>
+                  <h3>{displayName}</h3>
                   <p className="muted">
                     {piece.item_type} | {shop.shop_name || order.shop_id || "-"}
                   </p>
@@ -106,31 +107,43 @@ export function CuttingApp({ data, onUploadCuttingPhoto, busyAction }) {
                 )}
 
                 <div className="button-group-vertical">
-                  <label className="file-upload">
-                    <input
-                      type="file"
-                      accept="image/*"
-                      capture="environment"
-                      onChange={(event) =>
-                        handleFileChange(piece.piece_id, event.target.files?.[0])
-                      }
-                      disabled={busyAction === `cut:${piece.piece_id}`}
-                    />
-                    <span>
-                      {busyAction === `cut:${piece.piece_id}`
-                        ? "Uploading..."
-                        : "Upload Cutting Photo"}
-                    </span>
-                  </label>
+                  {piece.reference_slip_url ? (
+                    <>
+                      <label className="file-upload">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          capture="environment"
+                          onChange={(event) =>
+                            handleFileChange(piece.piece_id, event.target.files?.[0])
+                          }
+                          disabled={busyAction === `cut:${piece.piece_id}`}
+                        />
+                        <span>
+                          {busyAction === `cut:${piece.piece_id}`
+                            ? "Uploading..."
+                            : "Upload Cutting Photo"}
+                        </span>
+                      </label>
 
-                  <button 
-                    className="button secondary small"
-                    onClick={() => onUploadCuttingPhoto({ piece_id: piece.piece_id })}
-                    disabled={busyAction === `cut:${piece.piece_id}`}
-                    style={{marginTop: '0.5rem'}}
-                  >
-                    Mark Cut (No Photo)
-                  </button>
+                      <button
+                        className="button secondary small"
+                        onClick={() => onUploadCuttingPhoto({ piece_id: piece.piece_id })}
+                        disabled={busyAction === `cut:${piece.piece_id}`}
+                        style={{ marginTop: "0.5rem" }}
+                      >
+                        Mark Cut (No Photo)
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      className="button primary small"
+                      onClick={() => onUploadCuttingPhoto({ piece_id: piece.piece_id })}
+                      disabled={busyAction === `cut:${piece.piece_id}`}
+                    >
+                      Mark Cut
+                    </button>
+                  )}
                 </div>
               </article>
             );
