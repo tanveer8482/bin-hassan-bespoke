@@ -798,7 +798,19 @@ export function AdminApp({ data, actions, busyAction }) {
                   <input className="input" value={productForm.product_name} onChange={e => setProductForm({...productForm, product_name: e.target.value})} required />
                 </label>
                 <label>Shop Name
-                  <input className="input" value={productForm.shop_name} onChange={e => setProductForm({...productForm, shop_name: e.target.value})} required />
+                  <select
+                    className="input"
+                    value={productForm.shop_name}
+                    onChange={e => setProductForm({...productForm, shop_name: e.target.value})}
+                    required
+                  >
+                    <option value="">Select Shop</option>
+                    {data.shops.map((shop) => (
+                      <option key={shop.shop_id} value={shop.shop_name}>
+                        {shop.shop_name}
+                      </option>
+                    ))}
+                  </select>
                 </label>
                 <label>Shop Rate
                   <input type="number" className="input" value={productForm.shop_rate} onChange={e => setProductForm({...productForm, shop_rate: e.target.value})} required />

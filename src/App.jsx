@@ -242,7 +242,23 @@ export default function App() {
   const actions = useMemo(() => {
     return {
       createOrder: (payload) =>
-        runAction("createOrder", () => api.createOrder(token, payload), "Order created", true),
+        runAction(
+          "createOrder",
+          async () => {
+            const currentToken = window.localStorage.getItem(TOKEN_KEY) || token;
+            const created = await api.createOrder(currentToken, payload);
+            const orderId = created?.order?.order_id;
+            if (orderId) {
+              try {
+                await api.extractOrder(currentToken, { order_id: orderId });
+              } catch (error) {
+                console.warn("Auto extract failed after order create:", error);
+              }
+            }
+            return created;
+          },
+          "Order created"
+        ),
       updateOrder: (payload) =>
         runAction(
           payload.status === "delivered" ? `deliver:${payload.order_id}` : "updateOrder",
