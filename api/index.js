@@ -239,7 +239,12 @@ async function markPieceCut(req, res) {
   await ensureWorkbook();
   const body = await parseBody(req);
   requireFields(body, ["piece_id"]);
-  const updates = { cutting_done: "TRUE", cutting_by: user.username, cutting_date: nowISO(), cutting_verified: "TRUE", cutting_verified_date: nowISO() };
+  const updates = {
+    cutting_done: "TRUE",
+    cutting_by: user.username,
+    cutting_date: nowISO(),
+    updated_date: nowISO()
+  };
   if (body.photo_data_url) {
     const res = await resolvePhotoInput({ photoDataUrl: body.photo_data_url, folder: "cutting" });
     updates.cutting_photo_url = res.photoUrl;
@@ -464,6 +469,9 @@ const handlers = {
 };
 
 module.exports = async function (req, res) {
+  // #region agent log
+  fetch('http://127.0.0.1:7303/ingest/470ad46e-749f-4aff-a2a7-ed436dce2a04',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'672361'},body:JSON.stringify({sessionId:'672361',runId:'pre-fix',hypothesisId:'H7',location:'api/index.js:467',message:'API entry hit',data:{method:req?.method||'',url:req?.url||''},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PATCH, DELETE");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");

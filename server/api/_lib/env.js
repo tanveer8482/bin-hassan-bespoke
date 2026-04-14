@@ -39,11 +39,7 @@ function getEnv() {
     pollIntervalMs: Number(process.env.POLL_INTERVAL_MS || 20000),
     cloudinaryCloudName: process.env.CLOUDINARY_CLOUD_NAME || "",
     cloudinaryApiKey: process.env.CLOUDINARY_API_KEY || "",
-    cloudinaryApiSecret: process.env.CLOUDINARY_API_SECRET || "",
-    skipVisionVerification:
-      String(process.env.SKIP_VISION_VERIFICATION || "false").toLowerCase() ===
-      "true",
-    geminiApiKey: process.env.GEMINI_API_KEY || ""
+    cloudinaryApiSecret: process.env.CLOUDINARY_API_SECRET || ""
   };
 
   return cache;

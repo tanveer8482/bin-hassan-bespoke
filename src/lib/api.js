@@ -135,6 +135,9 @@ export async function compressImageBeforeUpload(
 async function uploadToCloudinaryUnsigned(blob, fileName, folder = "") {
   const endpoint = `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`;
   const uploadPreset = CLOUDINARY_UNSIGNED_UPLOAD_PRESET;
+  // #region agent log
+  fetch('http://127.0.0.1:7303/ingest/470ad46e-749f-4aff-a2a7-ed436dce2a04',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'672361'},body:JSON.stringify({sessionId:'672361',runId:'pre-fix',hypothesisId:'H2',location:'src/lib/api.js:138',message:'Unsigned Cloudinary upload started',data:{hasCloudName:Boolean(CLOUDINARY_CLOUD_NAME),hasUploadPreset:Boolean(CLOUDINARY_UNSIGNED_UPLOAD_PRESET),folder:folder||''},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
 
   const formData = new FormData();
   // Unsigned upload: upload_preset must be first.
@@ -165,6 +168,9 @@ async function uploadToCloudinaryUnsigned(blob, fileName, folder = "") {
   });
 
   const payload = await response.json().catch(() => ({}));
+  // #region agent log
+  fetch('http://127.0.0.1:7303/ingest/470ad46e-749f-4aff-a2a7-ed436dce2a04',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'672361'},body:JSON.stringify({sessionId:'672361',runId:'pre-fix',hypothesisId:'H2',location:'src/lib/api.js:170',message:'Unsigned Cloudinary upload result',data:{ok:response.ok,status:response.status,errorMessage:payload?.error?.message||'',hasSecureUrl:Boolean(payload?.secure_url)},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
   if (!response.ok || !payload.secure_url) {
     throw new Error(payload.error?.message || "Cloudinary unsigned upload failed");
   }
@@ -176,6 +182,9 @@ export async function preparePhotoPayloadForApi(
   file,
   { folder = "bin-hassan-bespoke", maxBytes = MAX_UPLOAD_BYTES } = {}
 ) {
+  // #region agent log
+  fetch('http://127.0.0.1:7303/ingest/470ad46e-749f-4aff-a2a7-ed436dce2a04',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'672361'},body:JSON.stringify({sessionId:'672361',runId:'pre-fix',hypothesisId:'H1',location:'src/lib/api.js:181',message:'Preparing photo payload',data:{fileType:file?.type||'',fileSize:file?.size||0,hasUnsignedConfig:hasCloudinaryUnsignedConfig(),folder},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
   const compressed = await compressImageBeforeUpload(file, { maxBytes });
 
   console.log(
