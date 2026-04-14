@@ -73,14 +73,22 @@ function computeOrderStatus(order, pieces) {
 
   const statuses = pieces.map((piece) => normalizeKey(piece.karigar_status));
 
-  if (statuses.every((status) => status === STATUS.KARIGAR.COMPLETE)) {
+  if (
+    statuses.every(
+      (status) =>
+        status === STATUS.KARIGAR.APPROVED || status === STATUS.KARIGAR.COMPLETE
+    )
+  ) {
     return STATUS.ORDER.READY;
   }
 
   if (
     statuses.some(
       (status) =>
-        status === STATUS.KARIGAR.ASSIGNED || status === STATUS.KARIGAR.COMPLETE
+        status === STATUS.KARIGAR.ASSIGNED ||
+        status === STATUS.KARIGAR.PENDING_APPROVAL ||
+        status === STATUS.KARIGAR.APPROVED ||
+        status === STATUS.KARIGAR.COMPLETE
     )
   ) {
     return STATUS.ORDER.IN_PROGRESS;
@@ -222,8 +230,13 @@ function computeKarigarFinancials(pieces, paymentsKarigar) {
     const karigarId = piece.assigned_karigar_id;
     if (!karigarId) return map;
     
-    // Only count as earned if completed AND synced
-    if (normalizeKey(piece.karigar_status) !== STATUS.KARIGAR.COMPLETE) return map;
+    // Count as earned only when approved/complete and synced.
+    if (
+      normalizeKey(piece.karigar_status) !== STATUS.KARIGAR.APPROVED &&
+      normalizeKey(piece.karigar_status) !== STATUS.KARIGAR.COMPLETE
+    ) {
+      return map;
+    }
     if (!parseBoolean(piece.is_synced)) return map;
 
     if (!map[karigarId]) map[karigarId] = 0;
@@ -236,8 +249,13 @@ function computeKarigarFinancials(pieces, paymentsKarigar) {
     const karigarId = piece.assigned_karigar_id;
     if (!karigarId) return map;
     
-    // Count as pending if completed but NOT synced
-    if (normalizeKey(piece.karigar_status) !== STATUS.KARIGAR.COMPLETE) return map;
+    // Count as pending if approved/complete but not synced yet.
+    if (
+      normalizeKey(piece.karigar_status) !== STATUS.KARIGAR.APPROVED &&
+      normalizeKey(piece.karigar_status) !== STATUS.KARIGAR.COMPLETE
+    ) {
+      return map;
+    }
     if (parseBoolean(piece.is_synced)) return map;
 
     if (!map[karigarId]) map[karigarId] = 0;
@@ -315,6 +333,10 @@ function filterSnapshotByRole(user, snapshot) {
         .map((piece) => piece.assigned_karigar_id)
         .filter(Boolean)
     );
+    const shopInvoices = snapshot.shopInvoices.filter(
+      (invoice) => invoice.shop_id === shopId
+    );
+    const invoiceIds = new Set(shopInvoices.map((invoice) => invoice.invoice_id));
 
     return {
       ...snapshot,
@@ -327,6 +349,11 @@ function filterSnapshotByRole(user, snapshot) {
       archivedOrders,
       orderItems,
       pieces,
+      shopInvoices,
+      shopInvoiceLines: snapshot.shopInvoiceLines.filter((line) =>
+        invoiceIds.has(line.invoice_id)
+      ),
+      payrollSyncRuns: [],
       paymentsShops: snapshot.paymentsShops.filter(
         (payment) => payment.shop_id === shopId
       ),
@@ -370,6 +397,9 @@ function filterSnapshotByRole(user, snapshot) {
       orders,
       orderItems,
       pieces,
+      shopInvoices: [],
+      shopInvoiceLines: [],
+      payrollSyncRuns: [],
       paymentsShops: [],
       paymentsKarigar: snapshot.paymentsKarigar.filter(
         (payment) => payment.karigar_id === karigarId
@@ -409,6 +439,9 @@ function filterSnapshotByRole(user, snapshot) {
       orders,
       orderItems,
       pieces,
+      shopInvoices: [],
+      shopInvoiceLines: [],
+      payrollSyncRuns: [],
       paymentsShops: [],
       paymentsKarigar: [],
       settings: [],
@@ -432,6 +465,9 @@ function filterSnapshotByRole(user, snapshot) {
     orders: [],
     orderItems: [],
     pieces: [],
+    shopInvoices: [],
+    shopInvoiceLines: [],
+    payrollSyncRuns: [],
     paymentsShops: [],
     paymentsKarigar: [],
     settings: [],
@@ -459,7 +495,9 @@ async function loadFullSnapshot() {
     settings,
     products,
     productSubProducts,
-    shopInvoices
+    shopInvoices,
+    shopInvoiceLines,
+    payrollSyncRuns
   ] = await Promise.all([
     getRecords(SHEETS.USERS),
     getRecords(SHEETS.SHOPS),
@@ -472,7 +510,9 @@ async function loadFullSnapshot() {
     getRecords(SHEETS.SETTINGS),
     getRecords(SHEETS.PRODUCTS),
     getRecords(SHEETS.PRODUCT_SUB_PRODUCTS),
-    getRecords(SHEETS.SHOP_INVOICES)
+    getRecords(SHEETS.SHOP_INVOICES),
+    getRecords(SHEETS.SHOP_INVOICE_LINES),
+    getRecords(SHEETS.PAYROLL_SYNC_RUNS)
   ]);
 
   return {
@@ -487,7 +527,9 @@ async function loadFullSnapshot() {
     settings,
     products,
     productSubProducts,
-    shopInvoices
+    shopInvoices,
+    shopInvoiceLines,
+    payrollSyncRuns
   };
 }
 

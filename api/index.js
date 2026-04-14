@@ -38,7 +38,12 @@ const {
 const DEFAULT_SETTINGS = [
   { key: "item_types", value: "normal,vip,chapma", description: "Allowed item types" },
   { key: "piece_types", value: "coat,pent,waistcoat,suit_2piece,suit_3piece", description: "Supported order piece types" },
-  { key: "cutting_rate", value: "0", description: "Default cutting rate per piece" }
+  { key: "cutting_rate", value: "0", description: "Default cutting rate per piece" },
+  { key: "cutting_rate_default", value: "0", description: "Default cutting rate used in piece crediting" },
+  { key: "approval_requires_photo", value: "false", description: "Whether completion approval requires photo upload" },
+  { key: "order_due_sorting", value: "asc", description: "Default order sorting by due date" },
+  { key: "payroll_sync_mode", value: "manual_master", description: "Payroll posting mode" },
+  { key: "invoice_prefix", value: "INV", description: "Prefix for generated shop invoices" }
 ];
 
 async function seedDefaults() {
@@ -123,7 +128,9 @@ function sanitizeSnapshot(snapshot) {
     settings: stripMetaSafe(snapshot.settings),
     products: stripMetaSafe(snapshot.products),
     productSubProducts: stripMetaSafe(snapshot.productSubProducts),
-    shopInvoices: stripMetaSafe(snapshot.shopInvoices)
+    shopInvoices: stripMetaSafe(snapshot.shopInvoices),
+    shopInvoiceLines: stripMetaSafe(snapshot.shopInvoiceLines),
+    payrollSyncRuns: stripMetaSafe(snapshot.payrollSyncRuns)
   };
 }
 
