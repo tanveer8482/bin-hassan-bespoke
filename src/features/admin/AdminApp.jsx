@@ -254,7 +254,21 @@ export function AdminApp({ data, actions, busyAction }) {
   }, [data.orders, orderFilter]);
 
   const pendingCutPieces = useMemo(() => {
-    return data.pieces.filter((piece) => !normalizeBool(piece.cutting_done));
+    const rawPending = data.pieces.filter((piece) => !normalizeBool(piece.cutting_done));
+    const grouped = new Map();
+
+    rawPending.forEach((piece) => {
+      const key = piece.item_id || piece.piece_id;
+      if (!grouped.has(key)) {
+        grouped.set(key, {
+          ...piece,
+          _pendingCount: 0
+        });
+      }
+      grouped.get(key)._pendingCount += 1;
+    });
+
+    return Array.from(grouped.values());
   }, [data.pieces]);
 
   const assignablePieces = useMemo(() => {
@@ -1185,6 +1199,9 @@ export function AdminApp({ data, actions, busyAction }) {
                   <p className="muted">
                     Shop: {shopsById[order?.shop_id]?.shop_name || order?.shop_id || "-"}
                   </p>
+                  {piece._pendingCount > 1 ? (
+                    <p className="muted">Includes {piece._pendingCount} sub-products</p>
+                  ) : null}
                   {piece.reference_slip_url ? (
                     <a className="link" href={piece.reference_slip_url} target="_blank" rel="noreferrer">
                       <img src={piece.reference_slip_url} alt="Reference slip" className="slip-thumb" />

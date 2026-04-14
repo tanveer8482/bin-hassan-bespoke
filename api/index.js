@@ -214,9 +214,18 @@ async function extractOrder(req, res) {
     const product =
       snapshot.products.find(p => p.product_id === item.product_id) ||
       snapshot.products.find(p => normalizeKey(p.product_name) === normalizeKey(item.piece_type));
-    if (!product) continue;
-    const subs = snapshot.productSubProducts.filter(s => s.product_id === product.product_id);
-    for (const sub of subs) {
+    const subs = product
+      ? snapshot.productSubProducts.filter(s => s.product_id === product.product_id)
+      : [];
+    const effectiveSubs = subs.length
+      ? subs
+      : [{
+          sub_product_name: item.piece_type || product?.product_name || "piece",
+          worker_rate: 0
+        }];
+
+    const fallbackShopRate = product ? toNumber(product.shop_rate) : toNumber(item.item_rate);
+    for (const sub of effectiveSubs) {
       pieces.push({
         piece_id: id("piece"),
         item_id: item.item_id,
@@ -228,7 +237,7 @@ async function extractOrder(req, res) {
         karigar_status: STATUS.KARIGAR.NOT_ASSIGNED,
         measurement_photo_url: item.measurement_photo_url,
         reference_slip_url: order.slip_photo_url,
-        shop_rate: toNumber(product.shop_rate),
+        shop_rate: fallbackShopRate,
         karigar_rate: toNumber(sub.worker_rate),
         is_synced: "FALSE",
         bundle_piece_type: product.product_name || item.piece_type,
@@ -259,6 +268,26 @@ async function markPieceCut(req, res) {
     const res = await resolvePhotoInput({ photoDataUrl: body.photo_data_url, folder: "cutting" });
     updates.cutting_photo_url = res.photoUrl;
   }
+  const pieces = await getRecords(SHEETS.PIECES);
+  const target = pieces.find((piece) => piece.piece_id === body.piece_id);
+  if (!target) {
+    const error = new Error("Piece not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const related = pieces.filter((piece) => piece.item_id === target.item_id);
+  if (related.length > 1) {
+    await updateMany(
+      SHEETS.PIECES,
+      related.map((piece) => ({
+        rowNumber: piece.__rowNumber,
+        record: { ...piece, ...updates }
+      }))
+    );
+    return sendOk(res, { message: `${related.length} related pieces marked cut` });
+  }
+
   await updateByField(SHEETS.PIECES, "piece_id", body.piece_id, updates);
   sendOk(res, { message: "Piece cut" });
 }

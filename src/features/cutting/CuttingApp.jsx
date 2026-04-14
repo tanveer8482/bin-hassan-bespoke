@@ -12,7 +12,25 @@ export function CuttingApp({ data, onUploadCuttingPhoto, busyAction }) {
   const shopsById = useMemo(() => byId(data.shops, "shop_id"), [data.shops]);
 
   const pendingPieces = useMemo(() => {
-    return data.pieces.filter((piece) => String(piece.cutting_done) !== "true");
+    const rawPending = data.pieces.filter((piece) => String(piece.cutting_done) !== "true");
+    const grouped = new Map();
+
+    rawPending.forEach((piece) => {
+      const key = piece.item_id || piece.piece_id;
+      if (!grouped.has(key)) {
+        grouped.set(key, {
+          ...piece,
+          _pendingCount: 0
+        });
+      }
+      const entry = grouped.get(key);
+      entry._pendingCount += 1;
+      if (!entry.reference_slip_url && piece.reference_slip_url) {
+        entry.reference_slip_url = piece.reference_slip_url;
+      }
+    });
+
+    return Array.from(grouped.values());
   }, [data.pieces]);
 
   const handleFileChange = async (pieceId, file) => {
@@ -69,6 +87,9 @@ export function CuttingApp({ data, onUploadCuttingPhoto, busyAction }) {
                   <p className="muted">
                     {piece.item_type} | {shop.shop_name || order.shop_id || "-"}
                   </p>
+                  {piece._pendingCount > 1 ? (
+                    <p className="muted">Includes {piece._pendingCount} sub-products</p>
+                  ) : null}
                   <p className="muted">Delivery: {formatDate(order.delivery_date)}</p>
                 </div>
 
