@@ -396,6 +396,20 @@ export function AdminApp({ data, actions, busyAction }) {
     }
   };
 
+  const handleSyncPayroll = async () => {
+    const confirmed = window.confirm(
+      "Sync all approved/completed pending pieces to payroll balances?"
+    );
+    if (!confirmed) return;
+
+    setSyncBusy(true);
+    try {
+      await actions.syncPayroll();
+    } finally {
+      setSyncBusy(false);
+    }
+  };
+
 
   const selectSlipPhoto = async (file) => {
     if (!file) return;
