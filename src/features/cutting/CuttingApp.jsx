@@ -91,6 +91,7 @@ export function CuttingApp({ data, onUploadCuttingPhoto, busyAction }) {
                   {piece._pendingCount > 1 ? (
                     <p className="muted">Includes {piece._pendingCount} sub-products</p>
                   ) : null}
+                  <p className="muted">Cutting Rate: {piece.cutting_credit_amount || 0}</p>
                   <p className="muted">Delivery: {formatDate(order.delivery_date)}</p>
                 </div>
 

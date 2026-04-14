@@ -19,11 +19,9 @@ const ITEM_TYPES = ["normal", "vip", "chapma"];
 const TAB_LIST = [
   { key: "dashboard", label: "Dashboard" },
   { key: "orders", label: "Orders" },
-  { key: "products", label: "Product Manager" },
+  { key: "settings", label: "Settings" },
   { key: "cutting", label: "Cutting" },
   { key: "assign", label: "Assign Work" },
-  { key: "shops", label: "Shops" },
-  { key: "karigar", label: "Karigar" },
   { key: "payments", label: "Payments" },
   { key: "track", label: "Track & Alerts" }
 ];
@@ -206,7 +204,8 @@ export function AdminApp({ data, actions, busyAction }) {
     entity_id: ""
   });
 
-  const [productForm, setProductForm] = useState({ product_name: "", shop_name: "", shop_rate: "" });
+  const [settingsTab, setSettingsTab] = useState("products");
+  const [productForm, setProductForm] = useState({ product_name: "", shop_name: "", shop_rate: "", cutting_rate: "" });
   const [subProductForm, setSubProductForm] = useState({ product_id: "", sub_product_name: "", worker_rate: "" });
   const [syncBusy, setSyncBusy] = useState(false);
 
@@ -214,6 +213,12 @@ export function AdminApp({ data, actions, busyAction }) {
   const [trackOrderId, setTrackOrderId] = useState("");
 
   const shopsById = useMemo(() => byId(data.shops, "shop_id"), [data.shops]);
+  const productsForSelectedShop = useMemo(() => {
+    const selectedShopName = shopsById[orderForm.shop_id]?.shop_name;
+    if (!selectedShopName) return [];
+    return data.products.filter((product) => product.shop_name === selectedShopName);
+  }, [data.products, orderForm.shop_id, shopsById]);
+
   const karigarById = useMemo(() => byId(data.karigars, "karigar_id"), [data.karigars]);
 
   const orderItemsByOrder = useMemo(() => {
@@ -538,11 +543,12 @@ export function AdminApp({ data, actions, busyAction }) {
     const payload = {
       product_name: productForm.product_name,
       shop_name: productForm.shop_name,
-      shop_rate: number(productForm.shop_rate)
+      shop_rate: number(productForm.shop_rate),
+      cutting_rate: number(productForm.cutting_rate || 0)
     };
     const ok = await actions.saveProduct(payload);
     if (ok) {
-      setProductForm({ product_name: "", shop_name: "", shop_rate: "" });
+      setProductForm({ product_name: "", shop_name: "", shop_rate: "", cutting_rate: "" });
     }
   };
 
@@ -806,7 +812,33 @@ export function AdminApp({ data, actions, busyAction }) {
         </section>
       ) : null}
 
-      {tab === "products" ? (
+      {tab === "settings" ? (
+        <section className="panel">
+          <h2>Settings</h2>
+          <div className="tab-row wrap" style={{ marginBottom: "1rem" }}>
+            <button
+              className={settingsTab === "products" ? "tab-button active" : "tab-button"}
+              onClick={() => setSettingsTab("products")}
+            >
+              Product Manager
+            </button>
+            <button
+              className={settingsTab === "shops" ? "tab-button active" : "tab-button"}
+              onClick={() => setSettingsTab("shops")}
+            >
+              Shops
+            </button>
+            <button
+              className={settingsTab === "karigar" ? "tab-button active" : "tab-button"}
+              onClick={() => setSettingsTab("karigar")}
+            >
+              Karigar
+            </button>
+          </div>
+        </section>
+      ) : null}
+
+      {tab === "products" || (tab === "settings" && settingsTab === "products") ? (
         <section className="panel">
           <h2>Product Manager</h2>
           <div className="split-grid">
@@ -834,6 +866,9 @@ export function AdminApp({ data, actions, busyAction }) {
                 <label>Shop Rate
                   <input type="number" className="input" value={productForm.shop_rate} onChange={e => setProductForm({...productForm, shop_rate: e.target.value})} required />
                 </label>
+                <label>Cutting Rate
+                  <input type="number" className="input" value={productForm.cutting_rate} onChange={e => setProductForm({...productForm, cutting_rate: e.target.value})} required />
+                </label>
                 <button className="button primary" type="submit">Save Product</button>
               </form>
             </div>
@@ -860,13 +895,14 @@ export function AdminApp({ data, actions, busyAction }) {
           <div className="table-wrap" style={{marginTop:'2rem'}}>
             <table>
               <thead>
-                <tr><th>Product</th><th>Shop Rate</th><th>Sub-Products</th></tr>
+                <tr><th>Product</th><th>Shop Rate</th><th>Cutting Rate</th><th>Sub-Products</th></tr>
               </thead>
               <tbody>
                 {data.products.map(p => (
                   <tr key={p.product_id}>
                     <td>{p.product_name}</td>
                     <td>{p.shop_rate}</td>
+                    <td>{p.cutting_rate || 0}</td>
                     <td>
                       {data.productSubProducts.filter(s => s.product_id === p.product_id).map(s => (
                         <span key={s.sub_id} className="badge" style={{marginRight:'4px'}}>
@@ -907,7 +943,15 @@ export function AdminApp({ data, actions, busyAction }) {
                 className="input"
                 value={orderForm.shop_id}
                 onChange={(event) =>
-                  setOrderForm((current) => ({ ...current, shop_id: event.target.value }))
+                  setOrderForm((current) => ({
+                    ...current,
+                    shop_id: event.target.value,
+                    items: current.items.map((item) => ({
+                      ...item,
+                      product_id: "",
+                      piece_type: ""
+                    }))
+                  }))
                 }
                 required
               >
@@ -1008,10 +1052,11 @@ export function AdminApp({ data, actions, busyAction }) {
                   className="input"
                   value={item.product_id}
                   onChange={(event) => updateOrderItem(index, "product_id", event.target.value)}
+                  disabled={!orderForm.shop_id}
                   required
                 >
-                  <option value="">Select Product Configuration</option>
-                  {data.products.map((p) => (
+                  <option value="">{orderForm.shop_id ? "Select Product Configuration" : "Select Shop First"}</option>
+                  {productsForSelectedShop.map((p) => (
                     <option key={p.product_id} value={p.product_id}>
                       {p.product_name} ({p.shop_name})
                     </option>
@@ -1330,7 +1375,7 @@ export function AdminApp({ data, actions, busyAction }) {
         </section>
       ) : null}
 
-      {tab === "shops" ? (
+      {tab === "shops" || (tab === "settings" && settingsTab === "shops") ? (
         <section className="panel">
           <h2>Shops</h2>
 
@@ -1546,7 +1591,7 @@ export function AdminApp({ data, actions, busyAction }) {
         </section>
       ) : null}
 
-      {tab === "karigar" ? (
+      {tab === "karigar" || (tab === "settings" && settingsTab === "karigar") ? (
         <section className="panel">
           <h2>Karigar</h2>
 

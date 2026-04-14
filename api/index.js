@@ -237,6 +237,7 @@ async function extractOrder(req, res) {
         karigar_status: STATUS.KARIGAR.NOT_ASSIGNED,
         measurement_photo_url: item.measurement_photo_url,
         reference_slip_url: order.slip_photo_url,
+        cutting_credit_amount: toNumber(product?.cutting_rate || 0),
         shop_rate: fallbackShopRate,
         karigar_rate: toNumber(sub.worker_rate),
         is_synced: "FALSE",
@@ -362,7 +363,16 @@ async function handleProducts(req, res) {
   requireRole(user, [ROLES.ADMIN]);
   const body = await parseBody(req);
   if (req.method === "POST") {
-    const record = { product_id: body.product_id || id("prod"), product_name: normalizeText(body.product_name), shop_name: normalizeText(body.shop_name), shop_rate: toNumber(body.shop_rate) };
+    const record = {
+      product_id: body.product_id || id("prod"),
+      product_name: normalizeText(body.product_name),
+      shop_name: normalizeText(body.shop_name),
+      shop_rate: toNumber(body.shop_rate),
+      cutting_rate: toNumber(body.cutting_rate),
+      is_active: "TRUE",
+      created_date: nowISO(),
+      updated_date: nowISO()
+    };
     await appendRecord(SHEETS.PRODUCTS, record);
     return sendOk(res, { message: "Product saved", record });
   }
