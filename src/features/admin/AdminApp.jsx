@@ -1209,18 +1209,28 @@ export function AdminApp({ data, actions, busyAction }) {
                     </a>
                   ) : null}
                   {piece.reference_slip_url ? (
-                    <label className="file-upload">
-                      <input
-                        type="file"
-                        accept="image/*"
-                        capture="environment"
-                        onChange={(event) => uploadCuttingPhoto(piece.piece_id, event.target.files?.[0])}
+                    <>
+                      <label className="file-upload">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          capture="environment"
+                          onChange={(event) => uploadCuttingPhoto(piece.piece_id, event.target.files?.[0])}
+                          disabled={busyAction === `cut:${piece.piece_id}`}
+                        />
+                        <span>
+                          {busyAction === `cut:${piece.piece_id}` ? "Uploading..." : "Upload Cutting Photo"}
+                        </span>
+                      </label>
+                      <button
+                        className="button secondary small"
+                        onClick={() => actions.markPieceCut({ piece_id: piece.piece_id })}
                         disabled={busyAction === `cut:${piece.piece_id}`}
-                      />
-                      <span>
-                        {busyAction === `cut:${piece.piece_id}` ? "Uploading..." : "Upload Cutting Photo"}
-                      </span>
-                    </label>
+                        style={{ marginTop: "0.5rem" }}
+                      >
+                        Mark Cut
+                      </button>
+                    </>
                   ) : (
                     <button
                       className="button primary small"
