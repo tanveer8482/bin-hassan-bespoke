@@ -545,6 +545,9 @@ export function AdminApp({ data, actions, busyAction }) {
       });
     }
   };
+  const handleApprovePiece = async (pieceId) => {
+    await actions.approvePiece({ piece_id: pieceId });
+  };
 
   const submitProduct = async (event) => {
     event.preventDefault();
@@ -788,8 +791,12 @@ export function AdminApp({ data, actions, busyAction }) {
                     <strong>{piece.piece_name}</strong> - {piece.item_type}
                     <p className="muted">Order: {ordersById[piece.order_id]?.order_number}</p>
                   </div>
-                  <button className="button success small" onClick={() => handleApprovePiece(piece.piece_id)}>
-                    Approve
+                  <button 
+                    className="button success small" 
+                    onClick={() => handleApprovePiece(piece.piece_id)}
+                    disabled={busyAction === `approve:${piece.piece_id}`}
+                  >
+                    {busyAction === `approve:${piece.piece_id}` ? "Saving..." : "Approve"}
                   </button>
                 </div>
               ))}
