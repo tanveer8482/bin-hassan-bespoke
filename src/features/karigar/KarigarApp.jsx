@@ -213,7 +213,6 @@ export function KarigarApp({ user, data, onCompletePiece, busyAction }) {
             {!pieces.length ? <p className="muted">No pieces found for this filter.</p> : null}
           </div>
         </section>
-        </section>
       ) : tab === "payments" ? (
         <section className="panel">
           <h2>Payment Summary</h2>

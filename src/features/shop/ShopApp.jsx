@@ -134,7 +134,6 @@ export function ShopApp({ user, data }) {
             {!orders.length ? <p className="muted">No orders found.</p> : null}
           </div>
         </section>
-        </section>
       ) : tab === "payments" ? (
         <section className="panel">
           <h2>Payment Summary</h2>
