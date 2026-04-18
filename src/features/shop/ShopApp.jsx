@@ -1,4 +1,4 @@
-﻿import { useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { StatusBadge } from "../../components/StatusBadge";
 import {
   byId,
@@ -8,6 +8,7 @@ import {
   ORDER_STATUS_META,
   PIECE_STATUS_META
 } from "../../lib/format";
+import { generateShopLedgerPdf } from "../../lib/pdfReport";
 
 function orderBadge(status) {
   return ORDER_STATUS_META[status] || { label: status, tone: "pending" };
@@ -64,6 +65,12 @@ export function ShopApp({ user, data }) {
           onClick={() => setTab("payments")}
         >
           My Payments
+        </button>
+        <button
+          className={tab === "ledger" ? "tab-button active" : "tab-button"}
+          onClick={() => setTab("ledger")}
+        >
+          Ledger & Reports
         </button>
       </div>
 
@@ -127,7 +134,7 @@ export function ShopApp({ user, data }) {
             {!orders.length ? <p className="muted">No orders found.</p> : null}
           </div>
         </section>
-      ) : (
+      ) : tab === "payments" ? (
         <section className="panel">
           <h2>Payment Summary</h2>
 
@@ -176,7 +183,36 @@ export function ShopApp({ user, data }) {
             </table>
           </div>
         </section>
-      )}
+      ) : tab === "ledger" ? (
+        <section className="panel">
+          <div className="panel-head">
+            <h2>Shop Ledger & Reports</h2>
+            <button 
+              className="button primary"
+              onClick={() => generateShopLedgerPdf(user, orders, data.paymentsShops, financial)}
+            >
+              Download My Report (PDF)
+            </button>
+          </div>
+          <p className="muted" style={{marginBottom: '1rem'}}>
+            Download a comprehensive report of all your orders and payments.
+          </p>
+          <div className="metrics-grid three">
+            <div className="metric-card">
+              <p>Total Billed</p>
+              <h3>{formatCurrency(financial.billed)}</h3>
+            </div>
+            <div className="metric-card">
+              <p>Total Received</p>
+              <h3>{formatCurrency(financial.paid)}</h3>
+            </div>
+            <div className="metric-card highlight">
+              <p>Balance Due</p>
+              <h3>{formatCurrency(financial.balance)}</h3>
+            </div>
+          </div>
+        </section>
+      ) : null}
     </div>
   );
 }

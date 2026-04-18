@@ -8,6 +8,7 @@ import {
   PIECE_STATUS_META
 } from "../../lib/format";
 import { preparePhotoPayloadForApi } from "../../lib/api";
+import { generateKarigarLedgerPdf } from "../../lib/pdfReport";
 
 function pieceBadge(status) {
   return PIECE_STATUS_META[status] || { label: status, tone: "pending" };
@@ -97,6 +98,12 @@ export function KarigarApp({ user, data, onCompletePiece, busyAction }) {
           onClick={() => setTab("payments")}
         >
           My Payments
+        </button>
+        <button
+          className={tab === "ledger" ? "tab-button active" : "tab-button"}
+          onClick={() => setTab("ledger")}
+        >
+          My Ledger
         </button>
       </div>
 
@@ -206,7 +213,7 @@ export function KarigarApp({ user, data, onCompletePiece, busyAction }) {
             {!pieces.length ? <p className="muted">No pieces found for this filter.</p> : null}
           </div>
         </section>
-      ) : (
+      ) : tab === "payments" ? (
         <section className="panel">
           <h2>Payment Summary</h2>
           <div className="metrics-grid three">
@@ -254,7 +261,36 @@ export function KarigarApp({ user, data, onCompletePiece, busyAction }) {
             </table>
           </div>
         </section>
-      )}
+      ) : tab === "ledger" ? (
+        <section className="panel">
+          <div className="panel-head">
+            <h2>Financial Ledger</h2>
+            <button 
+              className="button primary"
+              onClick={() => generateKarigarLedgerPdf(user, visiblePieces, paymentsKarigar, paymentSummary)}
+            >
+              Download My Ledger (PDF)
+            </button>
+          </div>
+          <p className="muted" style={{marginBottom: '1rem'}}>
+            This report includes your complete work history and payment records.
+          </p>
+          <div className="metrics-grid three">
+            <div className="metric-card">
+              <p>Earned</p>
+              <h3>{formatCurrency(paymentSummary.earned)}</h3>
+            </div>
+            <div className="metric-card">
+              <p>Paid</p>
+              <h3>{formatCurrency(paymentSummary.paid)}</h3>
+            </div>
+            <div className="metric-card highlight">
+              <p>Balance</p>
+              <h3>{formatCurrency(paymentSummary.balance)}</h3>
+            </div>
+          </div>
+        </section>
+      ) : null}
     </div>
   );
 }

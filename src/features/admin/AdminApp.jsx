@@ -1,4 +1,4 @@
-
+﻿
 import { useMemo, useState, useCallback } from "react";
 import { StatusBadge } from "../../components/StatusBadge";
 import {
@@ -12,6 +12,8 @@ import {
   PIECE_STATUS_META
 } from "../../lib/format";
 import { preparePhotoPayloadForApi } from "../../lib/api";
+import { generateMasterPayrollPdf } from "../../lib/pdfReport";
+
 
 const PIECE_TYPES = ["coat", "pent", "waistcoat", "suit_2piece", "suit_3piece"];
 const ITEM_TYPES = ["normal", "vip", "chapma"];
@@ -436,7 +438,11 @@ export function AdminApp({ data, actions, busyAction }) {
 
     setSyncBusy(true);
     try {
-      await actions.syncPayroll();
+      const result = await actions.syncPayroll();
+      if (result?.syncedPieces?.length > 0) {
+        const total = result.syncedPieces.reduce((sum, p) => sum + (p.karigar_rate || 0), 0);
+        generateMasterPayrollPdf(result.syncedPieces, total);
+      }
     } finally {
       setSyncBusy(false);
     }
@@ -2417,6 +2423,7 @@ export function AdminApp({ data, actions, busyAction }) {
     </div>
   );
 }
+
 
 
 
