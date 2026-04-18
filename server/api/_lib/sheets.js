@@ -7,6 +7,8 @@ let schemaEnsured = false;
 let schemaEnsurePromise = null;
 const headerCache = new Map();
 const sheetIdCache = new Map();
+const rowsCache = new Map();
+const ROW_CACHE_TTL_MS = 15000;
 
 function toColumnLabel(columnIndex) {
   let label = "";
@@ -26,12 +28,7 @@ function normalizeSheetTitle(range = "") {
 }
 
 function mergeHeaders(existingHeaders = [], requiredHeaders = []) {
-  const merged = [...existingHeaders];
-  requiredHeaders.forEach((header) => {
-    if (!header) return;
-    if (!merged.includes(header)) merged.push(header);
-  });
-  return merged;
+  return [...requiredHeaders];
 }
 
 function hasSameHeaderOrder(a = [], b = []) {
@@ -49,6 +46,41 @@ function cacheHeaders(tabName, headers = []) {
 function getCachedHeaders(tabName) {
   const headers = headerCache.get(tabName);
   return headers ? [...headers] : null;
+}
+
+function cloneRowsResult(result) {
+  return {
+    headers: [...(result.headers || [])],
+    rows: (result.rows || []).map((row) => [...row]),
+    records: (result.records || []).map((record) => ({ ...record }))
+  };
+}
+
+function getCachedRows(tabName) {
+  const cached = rowsCache.get(tabName);
+  if (!cached) return null;
+  if (Date.now() - cached.timestamp > ROW_CACHE_TTL_MS) {
+    rowsCache.delete(tabName);
+    return null;
+  }
+  return cloneRowsResult(cached.value);
+}
+
+function setCachedRows(tabName, value) {
+  rowsCache.set(tabName, {
+    timestamp: Date.now(),
+    value: cloneRowsResult(value)
+  });
+}
+
+function invalidateRowsCache(tabNames) {
+  if (!tabNames) {
+    rowsCache.clear();
+    return;
+  }
+
+  const targets = Array.isArray(tabNames) ? tabNames : [tabNames];
+  targets.forEach((tabName) => rowsCache.delete(tabName));
 }
 
 async function getSheetsApi() {
@@ -136,6 +168,7 @@ async function ensureHeaders(tabName, headers = []) {
         values: [merged]
       }
     });
+    invalidateRowsCache(tabName);
   }
 
   cacheHeaders(tabName, merged);
@@ -196,6 +229,7 @@ async function ensureWorkbook() {
     });
 
     const headerUpdates = [];
+    const columnTrimRequests = [];
     tabs.forEach((tabName) => {
       const existing = valuesByTab.get(tabName) || [];
       const required = REQUIRED_HEADERS[tabName] || [];
@@ -209,6 +243,28 @@ async function ensureWorkbook() {
       }
 
       cacheHeaders(tabName, merged);
+
+      const sheetId = sheetIdCache.get(tabName);
+      const currentSheet = (latestMeta.sheets || []).find(
+        (sheet) => sheet.properties?.title === tabName
+      );
+      const currentColumns = currentSheet?.properties?.gridProperties?.columnCount || 0;
+      if (
+        sheetId !== undefined &&
+        currentColumns > required.length &&
+        required.length > 0
+      ) {
+        columnTrimRequests.push({
+          deleteDimension: {
+            range: {
+              sheetId,
+              dimension: "COLUMNS",
+              startIndex: required.length,
+              endIndex: currentColumns
+            }
+          }
+        });
+      }
     });
 
     if (headerUpdates.length) {
@@ -217,6 +273,15 @@ async function ensureWorkbook() {
         requestBody: {
           valueInputOption: "RAW",
           data: headerUpdates
+        }
+      });
+    }
+
+    if (columnTrimRequests.length) {
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId: env.sheetsId,
+        requestBody: {
+          requests: columnTrimRequests
         }
       });
     }
@@ -257,30 +322,70 @@ function recordsToAppendCells(headers, records) {
   }));
 }
 
-async function getRows(tabName) {
+async function getManyRows(tabNames) {
   await ensureWorkbook();
-  const env = getEnv();
-  const sheets = await getSheetsApi();
-  const response = await sheets.spreadsheets.values.get({
-    spreadsheetId: env.sheetsId,
-    range: `${tabName}!A:ZZ`
+
+  const requestedTabs = [...new Set((tabNames || []).filter(Boolean))];
+  const results = {};
+  const missingTabs = [];
+
+  requestedTabs.forEach((tabName) => {
+    const cached = getCachedRows(tabName);
+    if (cached) {
+      results[tabName] = cached;
+      return;
+    }
+    missingTabs.push(tabName);
   });
 
-  const values = response.data.values || [];
-  const headers = values[0] || getCachedHeaders(tabName) || REQUIRED_HEADERS[tabName] || [];
-  const rows = values.slice(1);
-  cacheHeaders(tabName, headers);
+  if (!missingTabs.length) {
+    return results;
+  }
 
-  return {
-    headers,
-    rows,
-    records: rowsToRecords(headers, rows)
-  };
+  const env = getEnv();
+  const sheets = await getSheetsApi();
+  const response = await sheets.spreadsheets.values.batchGet({
+    spreadsheetId: env.sheetsId,
+    ranges: missingTabs.map((tabName) => `${tabName}!A:ZZ`)
+  });
+
+  const valuesByTab = new Map();
+  (response.data.valueRanges || []).forEach((valueRange) => {
+    valuesByTab.set(normalizeSheetTitle(valueRange.range || ""), valueRange.values || []);
+  });
+
+  missingTabs.forEach((tabName) => {
+    const values = valuesByTab.get(tabName) || [];
+    const headers = values[0] || getCachedHeaders(tabName) || REQUIRED_HEADERS[tabName] || [];
+    const rows = values.slice(1);
+    const result = {
+      headers,
+      rows,
+      records: rowsToRecords(headers, rows)
+    };
+    cacheHeaders(tabName, headers);
+    setCachedRows(tabName, result);
+    results[tabName] = cloneRowsResult(result);
+  });
+
+  return results;
+}
+
+async function getRows(tabName) {
+  const results = await getManyRows([tabName]);
+  return results[tabName];
 }
 
 async function getRecords(tabName) {
   const result = await getRows(tabName);
   return result.records;
+}
+
+async function getManyRecords(tabNames) {
+  const rowsByTab = await getManyRows(tabNames);
+  return Object.fromEntries(
+    Object.entries(rowsByTab).map(([tabName, result]) => [tabName, result.records])
+  );
 }
 
 async function appendRecord(tabName, record) {
@@ -295,8 +400,7 @@ async function appendRecords(tabName, records) {
   const env = getEnv();
   const sheets = await getSheetsApi();
   const required = REQUIRED_HEADERS[tabName] || [];
-  const allKeys = [...new Set([...required, ...records.flatMap((record) => Object.keys(record))])];
-  const headers = await ensureHeaders(tabName, allKeys);
+  const headers = await ensureHeaders(tabName, required);
   const values = records.map((record) => recordToRow(headers, record));
 
   await sheets.spreadsheets.values.append({
@@ -306,6 +410,7 @@ async function appendRecords(tabName, records) {
     insertDataOption: "INSERT_ROWS",
     requestBody: { values }
   });
+  invalidateRowsCache(tabName);
 }
 
 async function appendRecordsBatch(operations) {
@@ -326,13 +431,7 @@ async function appendRecordsBatch(operations) {
 
   for (const entry of work) {
     const required = REQUIRED_HEADERS[entry.tabName] || [];
-    const allKeys = [
-      ...new Set([
-        ...required,
-        ...entry.records.flatMap((record) => Object.keys(record))
-      ])
-    ];
-    const headers = await ensureHeaders(entry.tabName, allKeys);
+    const headers = await ensureHeaders(entry.tabName, required);
     const sheetId = await getSheetId(entry.tabName);
 
     requests.push({
@@ -350,6 +449,7 @@ async function appendRecordsBatch(operations) {
     spreadsheetId: env.sheetsId,
     requestBody: { requests }
   });
+  invalidateRowsCache(work.map((entry) => entry.tabName));
 }
 
 async function updateRecord(tabName, rowNumber, patch) {
@@ -376,6 +476,7 @@ async function updateRecord(tabName, rowNumber, patch) {
       values: [recordToRow(headers, merged)]
     }
   });
+  invalidateRowsCache(tabName);
 
   return { ...merged, __rowNumber: rowNumber };
 }
@@ -403,6 +504,7 @@ async function updateByField(tabName, field, value, patch) {
       values: [recordToRow(headers, merged)]
     }
   });
+  invalidateRowsCache(tabName);
 
   return { ...merged, __rowNumber: target.__rowNumber };
 }
@@ -427,6 +529,7 @@ async function updateMany(tabName, rows) {
       data
     }
   });
+  invalidateRowsCache(tabName);
 }
 
 async function deleteRecord(tabName, rowNumber) {
@@ -452,6 +555,7 @@ async function deleteRecord(tabName, rowNumber) {
       ]
     }
   });
+  invalidateRowsCache(tabName);
 }
 
 async function deleteByField(tabName, field, value) {
@@ -467,13 +571,31 @@ async function deleteByField(tabName, field, value) {
   return target;
 }
 
+async function clearAllDataTabs(tabNames = []) {
+  await ensureWorkbook();
+  const env = getEnv();
+  const sheets = await getSheetsApi();
+  const targets = tabNames.length ? tabNames : Object.keys(REQUIRED_HEADERS);
+  const ranges = targets.map((tabName) => `${tabName}!A2:ZZ`);
+  if (!ranges.length) return;
+
+  await sheets.spreadsheets.values.batchClear({
+    spreadsheetId: env.sheetsId,
+    requestBody: { ranges }
+  });
+  invalidateRowsCache(targets);
+}
+
 module.exports = {
   appendRecord,
   appendRecords,
   appendRecordsBatch,
   deleteByField,
   deleteRecord,
+  clearAllDataTabs,
   ensureWorkbook,
+  getManyRecords,
+  getManyRows,
   getRecords,
   getRows,
   updateByField,

@@ -5,7 +5,7 @@ const {
   SHEETS,
   STATUS
 } = require("./constants");
-const { getRecords, updateMany } = require("./sheets");
+const { getManyRecords, getRecords, updateMany } = require("./sheets");
 const { normalizeKey, nowISO, parseBoolean, toNumber } = require("./utils");
 
 function rateKey(entityId, pieceName, itemType) {
@@ -138,9 +138,16 @@ function buildDashboard(orders, pieces) {
   };
 }
 
-async function refreshOrderStatuses(targetOrderIds = []) {
-  const orders = await getRecords(SHEETS.ORDERS);
-  const pieces = await getRecords(SHEETS.PIECES);
+async function refreshOrderStatuses(targetOrderIds = [], snapshot = null) {
+  let orders = snapshot?.orders;
+  let pieces = snapshot?.pieces;
+
+  if (!orders || !pieces) {
+    const records = await getManyRecords([SHEETS.ORDERS, SHEETS.PIECES]);
+    orders = records[SHEETS.ORDERS] || [];
+    pieces = records[SHEETS.PIECES] || [];
+  }
+
   const targetSet = new Set(targetOrderIds);
   const now = nowISO();
 
@@ -166,6 +173,19 @@ async function refreshOrderStatuses(targetOrderIds = []) {
 
   if (updates.length) {
     await updateMany(SHEETS.ORDERS, updates);
+    const updatedById = new Map(
+      updates.map((update) => [
+        update.record.order_id,
+        {
+          ...update.record,
+          __rowNumber: update.rowNumber
+        }
+      ])
+    );
+    orders = orders.map((order) => updatedById.get(order.order_id) || order);
+    if (snapshot?.orders) {
+      snapshot.orders = orders;
+    }
   }
 
   return updates.length;
@@ -483,53 +503,38 @@ function filterSnapshotByRole(user, snapshot) {
 }
 
 async function loadFullSnapshot() {
-  const [
-    users,
-    shops,
-    karigars,
-    orders,
-    orderItems,
-    pieces,
-    paymentsShops,
-    paymentsKarigar,
-    settings,
-    products,
-    productSubProducts,
-    shopInvoices,
-    shopInvoiceLines,
-    payrollSyncRuns
-  ] = await Promise.all([
-    getRecords(SHEETS.USERS),
-    getRecords(SHEETS.SHOPS),
-    getRecords(SHEETS.KARIGAR),
-    getRecords(SHEETS.ORDERS),
-    getRecords(SHEETS.ORDER_ITEMS),
-    getRecords(SHEETS.PIECES),
-    getRecords(SHEETS.PAYMENTS_SHOPS),
-    getRecords(SHEETS.PAYMENTS_KARIGAR),
-    getRecords(SHEETS.SETTINGS),
-    getRecords(SHEETS.PRODUCTS),
-    getRecords(SHEETS.PRODUCT_SUB_PRODUCTS),
-    getRecords(SHEETS.SHOP_INVOICES),
-    getRecords(SHEETS.SHOP_INVOICE_LINES),
-    getRecords(SHEETS.PAYROLL_SYNC_RUNS)
+  const records = await getManyRecords([
+    SHEETS.USERS,
+    SHEETS.SHOPS,
+    SHEETS.KARIGAR,
+    SHEETS.ORDERS,
+    SHEETS.ORDER_ITEMS,
+    SHEETS.PIECES,
+    SHEETS.PAYMENTS_SHOPS,
+    SHEETS.PAYMENTS_KARIGAR,
+    SHEETS.SETTINGS,
+    SHEETS.PRODUCTS,
+    SHEETS.PRODUCT_SUB_PRODUCTS,
+    SHEETS.SHOP_INVOICES,
+    SHEETS.SHOP_INVOICE_LINES,
+    SHEETS.PAYROLL_SYNC_RUNS
   ]);
 
   return {
-    users,
-    shops,
-    karigars,
-    orders,
-    orderItems,
-    pieces,
-    paymentsShops,
-    paymentsKarigar,
-    settings,
-    products,
-    productSubProducts,
-    shopInvoices,
-    shopInvoiceLines,
-    payrollSyncRuns
+    users: records[SHEETS.USERS] || [],
+    shops: records[SHEETS.SHOPS] || [],
+    karigars: records[SHEETS.KARIGAR] || [],
+    orders: records[SHEETS.ORDERS] || [],
+    orderItems: records[SHEETS.ORDER_ITEMS] || [],
+    pieces: records[SHEETS.PIECES] || [],
+    paymentsShops: records[SHEETS.PAYMENTS_SHOPS] || [],
+    paymentsKarigar: records[SHEETS.PAYMENTS_KARIGAR] || [],
+    settings: records[SHEETS.SETTINGS] || [],
+    products: records[SHEETS.PRODUCTS] || [],
+    productSubProducts: records[SHEETS.PRODUCT_SUB_PRODUCTS] || [],
+    shopInvoices: records[SHEETS.SHOP_INVOICES] || [],
+    shopInvoiceLines: records[SHEETS.SHOP_INVOICE_LINES] || [],
+    payrollSyncRuns: records[SHEETS.PAYROLL_SYNC_RUNS] || []
   };
 }
 

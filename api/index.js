@@ -18,7 +18,8 @@ const {
   ensureWorkbook,
   getRecords,
   updateByField,
-  updateMany
+  updateMany,
+  clearAllDataTabs
 } = require("../server/api/_lib/sheets");
 const { resolvePhotoInput } = require("../server/api/_lib/media");
 const {
@@ -138,8 +139,8 @@ async function handleSnapshot(req, res) {
   ensureMethod(req, ["GET"]);
   const user = requireAuth(req);
   await ensureWorkbook();
-  await refreshOrderStatuses();
   const snapshot = await loadFullSnapshot();
+  await refreshOrderStatuses([], snapshot);
   const withComputed = withComputedFields(snapshot);
   const filtered = filterSnapshotByRole(user, withComputed);
   sendOk(res, { data: sanitizeSnapshot(filtered), last_synced: nowISO() });
@@ -477,6 +478,15 @@ async function handleSettings(req, res) {
   sendOk(res, { message: "Setting updated" });
 }
 
+async function handleClearAllData(req, res) {
+  ensureMethod(req, ["POST"]);
+  const user = requireAuth(req);
+  requireRole(user, [ROLES.ADMIN]);
+  await ensureWorkbook();
+  await clearAllDataTabs();
+  sendOk(res, { message: "All sheet data cleared" });
+}
+
 // ============ ROUTER ============
 
 const handlers = {
@@ -514,13 +524,11 @@ const handlers = {
   updateUser: withErrorHandler(async (req, res) => { req.method = 'PATCH'; return handleUsers(req, res); }),
   deleteUser: withErrorHandler(async (req, res) => { req.method = 'DELETE'; return handleUsers(req, res); }),
   listSettings: withErrorHandler(async (req, res) => { req.method = 'GET'; return handleSettings(req, res); }),
-  saveSettings: withErrorHandler(async (req, res) => { req.method = 'POST'; return handleSettings(req, res); })
+  saveSettings: withErrorHandler(async (req, res) => { req.method = 'POST'; return handleSettings(req, res); }),
+  clearAllData: withErrorHandler(handleClearAllData)
 };
 
 module.exports = async function (req, res) {
-  // #region agent log
-  fetch('http://127.0.0.1:7303/ingest/470ad46e-749f-4aff-a2a7-ed436dce2a04',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'672361'},body:JSON.stringify({sessionId:'672361',runId:'pre-fix',hypothesisId:'H7',location:'api/index.js:467',message:'API entry hit',data:{method:req?.method||'',url:req?.url||''},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PATCH, DELETE");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
