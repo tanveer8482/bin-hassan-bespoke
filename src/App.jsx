@@ -707,9 +707,11 @@ export default function App() {
           <p className="muted role-note">Role: {user?.role || "-"}</p>
         </div>
         <div className="topbar-actions">
-          <button className="button ghost" onClick={() => actions.refresh()}>
-            Refresh
-          </button>
+          {user?.role !== "karigar" && user?.role !== "shop" && (
+            <button className="button ghost" onClick={() => actions.refresh()}>
+              Refresh
+            </button>
+          )}
           <button className="button ghost" onClick={logout}>
             Logout
           </button>
