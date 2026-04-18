@@ -1,6 +1,14 @@
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, TOKEN_KEY, USER_KEY } from "./lib/api";
+import {
+  clearPersistedState,
+  loadPersistedAppState,
+  normalizeSnapshotCache,
+  PERSISTENCE_KEYS,
+  removePersistedValue,
+  setPersistedValue
+} from "./lib/appPersistence";
 import { emptySnapshot } from "./lib/emptySnapshot";
 import { SyncBar } from "./components/SyncBar";
 import { AdminApp } from "./features/admin/AdminApp";
@@ -9,6 +17,12 @@ import { ShopApp } from "./features/shop/ShopApp";
 import { CuttingApp } from "./features/cutting/CuttingApp";
 
 const DEFAULT_POLL_MS = 20000;
+const LEGACY_MUTATION_QUEUE_KEY = "bhb_mutation_queue_v1";
+const LEGACY_SNAPSHOT_CACHE_KEY = "bhb_snapshot_cache_v1";
+const LEGACY_SYNC_HISTORY_KEY = "bhb_sync_history_v1";
+const SYNC_WINDOW_MS = 120000;
+const MIN_SYNC_GAP_MS = 30000;
+const MAX_SYNC_ATTEMPTS_PER_WINDOW = 2;
 
 function getStoredJson(key, fallback) {
   try {
@@ -17,6 +31,40 @@ function getStoredJson(key, fallback) {
     return JSON.parse(raw);
   } catch {
     return fallback;
+  }
+}
+
+function loadLegacyCachedSnapshot() {
+  return normalizeSnapshotCache(getStoredJson(LEGACY_SNAPSHOT_CACHE_KEY, null));
+}
+
+function hasCachedSnapshotData(snapshotCache) {
+  if (!snapshotCache || typeof snapshotCache !== "object") return false;
+  if (snapshotCache.lastSynced) return true;
+  if (Array.isArray(snapshotCache.settings) && snapshotCache.settings.length) return true;
+
+  const data = snapshotCache.data || {};
+  const collectionKeys = [
+    "users",
+    "shops",
+    "karigars",
+    "orders",
+    "orderItems",
+    "pieces",
+    "paymentsShops",
+    "paymentsKarigar",
+    "shopRates",
+    "karigarRates"
+  ];
+
+  return collectionKeys.some((key) => Array.isArray(data[key]) && data[key].length > 0);
+}
+
+function removeLegacyPersistenceKey(key) {
+  try {
+    window.localStorage.removeItem(key);
+  } catch {
+    // ignore storage cleanup failures
   }
 }
 
@@ -79,11 +127,16 @@ export default function App() {
   const [token, setToken] = useState(() => window.localStorage.getItem(TOKEN_KEY) || "");
   const [user, setUser] = useState(() => getStoredJson(USER_KEY, null));
 
-  const [data, setData] = useState(emptySnapshot());
+  const [data, setData] = useState(() => emptySnapshot());
   const [settings, setSettings] = useState([]);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [pollIntervalMs, setPollIntervalMs] = useState(DEFAULT_POLL_MS);
   const [lastSynced, setLastSynced] = useState("");
+  const [pendingMutations, setPendingMutations] = useState([]);
+  const [syncMeta, setSyncMeta] = useState({ queuedAt: "", flushInProgress: false });
+  const [storageReady, setStorageReady] = useState(false);
+  const syncHistoryRef = useRef([]);
+  const remoteSnapshotLoadedRef = useRef(false);
 
   const [loading, setLoading] = useState(Boolean(token));
   const [busyAction, setBusyAction] = useState("");
@@ -107,6 +160,82 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    let active = true;
+
+    (async () => {
+      try {
+        const persisted = await loadPersistedAppState();
+        const legacyMutationQueue = getStoredJson(LEGACY_MUTATION_QUEUE_KEY, []);
+        const legacySnapshotCache = loadLegacyCachedSnapshot();
+        const legacySyncHistory = getStoredJson(LEGACY_SYNC_HISTORY_KEY, []);
+
+        let nextMutationQueue = persisted.mutationQueue;
+        let nextSnapshotCache = persisted.snapshotCache;
+        let nextSyncHistory = persisted.syncHistory;
+
+        if (!nextMutationQueue.length && legacyMutationQueue.length) {
+          nextMutationQueue = legacyMutationQueue;
+          const stored = await setPersistedValue(
+            PERSISTENCE_KEYS.mutationQueue,
+            legacyMutationQueue
+          );
+          if (stored) removeLegacyPersistenceKey(LEGACY_MUTATION_QUEUE_KEY);
+        } else if (nextMutationQueue.length) {
+          removeLegacyPersistenceKey(LEGACY_MUTATION_QUEUE_KEY);
+        }
+
+        if (!hasCachedSnapshotData(nextSnapshotCache) && hasCachedSnapshotData(legacySnapshotCache)) {
+          nextSnapshotCache = legacySnapshotCache;
+          const stored = await setPersistedValue(
+            PERSISTENCE_KEYS.snapshotCache,
+            legacySnapshotCache
+          );
+          if (stored) removeLegacyPersistenceKey(LEGACY_SNAPSHOT_CACHE_KEY);
+        } else if (hasCachedSnapshotData(nextSnapshotCache)) {
+          removeLegacyPersistenceKey(LEGACY_SNAPSHOT_CACHE_KEY);
+        }
+
+        if (!nextSyncHistory.length && legacySyncHistory.length) {
+          nextSyncHistory = legacySyncHistory;
+          const stored = await setPersistedValue(
+            PERSISTENCE_KEYS.syncHistory,
+            legacySyncHistory
+          );
+          if (stored) removeLegacyPersistenceKey(LEGACY_SYNC_HISTORY_KEY);
+        } else if (nextSyncHistory.length) {
+          removeLegacyPersistenceKey(LEGACY_SYNC_HISTORY_KEY);
+        }
+
+        if (!active) return;
+
+        syncHistoryRef.current = nextSyncHistory;
+        setPendingMutations(nextMutationQueue);
+        setSyncMeta((current) => ({
+          ...current,
+          queuedAt: nextMutationQueue.length ? current.queuedAt || new Date().toISOString() : ""
+        }));
+
+        if (!remoteSnapshotLoadedRef.current) {
+          setData(nextSnapshotCache.data);
+          setSettings(nextSnapshotCache.settings);
+          setSettingsLoaded(Boolean(nextSnapshotCache.settings.length));
+          setLastSynced(nextSnapshotCache.lastSynced);
+        }
+      } catch (error) {
+        console.warn("[APP_STORAGE] hydration failed", error);
+      } finally {
+        if (active) {
+          setStorageReady(true);
+        }
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
     if (!notice) return;
 
     const timer = window.setTimeout(() => {
@@ -115,6 +244,25 @@ export default function App() {
 
     return () => window.clearTimeout(timer);
   }, [notice]);
+
+  useEffect(() => {
+    if (!storageReady) return;
+
+    void setPersistedValue(PERSISTENCE_KEYS.mutationQueue, pendingMutations);
+    if (!pendingMutations.length) {
+      setSyncMeta((current) => ({ ...current, queuedAt: "" }));
+    }
+  }, [pendingMutations, storageReady]);
+
+  useEffect(() => {
+    if (!storageReady) return;
+
+    void setPersistedValue(PERSISTENCE_KEYS.snapshotCache, {
+      data,
+      settings,
+      lastSynced
+    });
+  }, [data, settings, lastSynced, storageReady]);
 
   const logout = useCallback(() => {
     setToken("");
@@ -126,9 +274,18 @@ export default function App() {
     setError("");
     setNotice("");
     setLastSynced("");
+    setPendingMutations([]);
+    setSyncMeta({ queuedAt: "", flushInProgress: false });
+    setStorageReady(true);
+    syncHistoryRef.current = [];
+    remoteSnapshotLoadedRef.current = false;
 
     window.localStorage.removeItem(TOKEN_KEY);
     window.localStorage.removeItem(USER_KEY);
+    removeLegacyPersistenceKey(LEGACY_MUTATION_QUEUE_KEY);
+    removeLegacyPersistenceKey(LEGACY_SNAPSHOT_CACHE_KEY);
+    removeLegacyPersistenceKey(LEGACY_SYNC_HISTORY_KEY);
+    void clearPersistedState();
   }, []);
 
   const refreshSnapshot = useCallback(
@@ -140,6 +297,7 @@ export default function App() {
       try {
         const response = await api.getSnapshot(currentToken);
         const snapshotData = response.data || emptySnapshot();
+        remoteSnapshotLoadedRef.current = true;
         
         // Cache settings separately to avoid refetching
         if (snapshotData.settings && (!settingsLoaded || JSON.stringify(snapshotData.settings) !== JSON.stringify(settings))) {
@@ -173,8 +331,192 @@ export default function App() {
     [token, logout]
   );
 
+  const canFlushNow = useCallback(() => {
+    const now = Date.now();
+    const currentHistory = syncHistoryRef.current || [];
+    const recent = (syncHistoryRef.current || []).filter(
+      (timestamp) => now - timestamp <= SYNC_WINDOW_MS
+    );
+    syncHistoryRef.current = recent;
+    if (recent.length !== currentHistory.length) {
+      void setPersistedValue(PERSISTENCE_KEYS.syncHistory, recent);
+    }
+
+    if (recent.length >= MAX_SYNC_ATTEMPTS_PER_WINDOW) {
+      return false;
+    }
+
+    const lastAttempt = recent[recent.length - 1] || 0;
+    if (lastAttempt && now - lastAttempt < MIN_SYNC_GAP_MS) {
+      return false;
+    }
+
+    return true;
+  }, []);
+
+  const markFlushAttempt = useCallback(async () => {
+    const next = [...(syncHistoryRef.current || []), Date.now()];
+    syncHistoryRef.current = next;
+    await setPersistedValue(PERSISTENCE_KEYS.syncHistory, next);
+  }, []);
+
+  const executeMutation = useCallback(
+    async (mutation, activeToken) => {
+      const payload = mutation?.payload || {};
+      const currentToken = activeToken || window.localStorage.getItem(TOKEN_KEY) || "";
+      switch (mutation?.type) {
+        case "createOrder": {
+          const created = await api.createOrder(currentToken, payload);
+          const orderId = created?.order?.order_id;
+          if (orderId) {
+            await api.extractOrder(currentToken, { order_id: orderId });
+          }
+          return;
+        }
+        case "updateOrder":
+          await api.updateOrder(currentToken, payload);
+          return;
+        case "markPieceCut":
+          await api.markPieceCut(currentToken, payload);
+          return;
+        case "extractOrder":
+          await api.extractOrder(currentToken, payload);
+          return;
+        case "approvePiece":
+          await api.approvePiece(currentToken, payload);
+          return;
+        case "syncPayroll":
+          await api.syncPayroll(currentToken, payload);
+          return;
+        case "generateInvoice":
+          await api.generateInvoice(currentToken, payload);
+          return;
+        case "saveProduct":
+          await api.saveProduct(currentToken, payload);
+          return;
+        case "saveSubProduct":
+          await api.saveSubProduct(currentToken, payload);
+          return;
+        case "assignPiece":
+          await api.assignPiece(currentToken, payload);
+          return;
+        case "completePiece":
+          await api.requestApproval(currentToken, payload);
+          return;
+        case "createShop":
+          await api.createShop(currentToken, payload);
+          return;
+        case "updateShop":
+          await api.updateShop(currentToken, payload);
+          return;
+        case "createKarigar":
+          await api.createKarigar(currentToken, payload);
+          return;
+        case "updateKarigar":
+          await api.updateKarigar(currentToken, payload);
+          return;
+        case "createShopPayment":
+          await api.createShopPayment(currentToken, payload);
+          return;
+        case "createKarigarPayment":
+          await api.createKarigarPayment(currentToken, payload);
+          return;
+        case "createUser":
+          await api.createUser(currentToken, payload);
+          return;
+        case "updateUser":
+          await api.updateUser(currentToken, payload);
+          return;
+        case "deleteUser":
+          await api.deleteUser(currentToken, payload);
+          return;
+        case "saveSettings":
+          await api.saveSettings(currentToken, payload);
+          return;
+        case "clearAllData":
+          await api.clearAllData(currentToken, payload);
+          return;
+        default:
+          return;
+      }
+    },
+    []
+  );
+
+  const flushQueuedMutations = useCallback(
+    async (options = { force: false }) => {
+      if (!token || offline || !storageReady) return false;
+      if (!pendingMutations.length) return false;
+      if (syncMeta.flushInProgress) return false;
+      if (!options.force && !canFlushNow()) return false;
+
+      setSyncMeta((current) => ({ ...current, flushInProgress: true }));
+      await markFlushAttempt();
+
+      try {
+        const hasDeleteAll = pendingMutations.some(
+          (mutation) => mutation.type === "clearAllData"
+        );
+        for (const mutation of pendingMutations) {
+          await executeMutation(mutation, token);
+        }
+        setPendingMutations([]);
+        await setPersistedValue(PERSISTENCE_KEYS.mutationQueue, []);
+        if (hasDeleteAll) {
+          setData(emptySnapshot());
+          setSettings([]);
+          setSettingsLoaded(false);
+          setLastSynced(new Date().toISOString());
+          await removePersistedValue(PERSISTENCE_KEYS.snapshotCache);
+          setNotice("All data deleted");
+          return true;
+        }
+        await refreshSnapshot(token, { silent: true });
+        setNotice("Queued changes synced");
+        return true;
+      } catch (flushError) {
+        setError(flushError.message || "Queued sync failed");
+        return false;
+      } finally {
+        setSyncMeta((current) => ({ ...current, flushInProgress: false }));
+      }
+    },
+    [
+      token,
+      offline,
+      pendingMutations,
+      syncMeta.flushInProgress,
+      canFlushNow,
+      markFlushAttempt,
+      executeMutation,
+      refreshSnapshot,
+      storageReady
+    ]
+  );
+
+  const enqueueMutation = useCallback((type, payload, actionKey, noticeText) => {
+    const record = {
+      id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      type,
+      payload,
+      actionKey,
+      noticeText
+    };
+    setPendingMutations((current) => {
+      const next = [...current, record];
+      if (storageReady) {
+        void setPersistedValue(PERSISTENCE_KEYS.mutationQueue, next);
+      }
+      return next;
+    });
+    setSyncMeta((current) => ({
+      ...current,
+      queuedAt: current.queuedAt || new Date().toISOString()
+    }));
+  }, [storageReady]);
+
   useEffect(() => {
-    if (!token) {
+    if (!token || !storageReady) {
       setLoading(false);
       return;
     }
@@ -202,32 +544,37 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [token, user, refreshSnapshot, logout]);
+  }, [token, user, refreshSnapshot, logout, storageReady]);
 
   useEffect(() => {
-    if (!token) return undefined;
+    if (!token || !storageReady) return undefined;
 
     const timer = window.setInterval(() => {
       refreshSnapshot(token, { silent: true });
     }, pollIntervalMs);
 
     return () => window.clearInterval(timer);
-  }, [token, pollIntervalMs, refreshSnapshot]);
+  }, [token, pollIntervalMs, refreshSnapshot, storageReady]);
+
+  useEffect(() => {
+    if (!token || !storageReady) return undefined;
+    const timer = window.setInterval(() => {
+      flushQueuedMutations();
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [token, flushQueuedMutations, storageReady]);
 
   const runAction = useCallback(
-    async (actionKey, fn, noticeText = "Saved", skipRefresh = false) => {
-      if (!token) return false;
+    async (actionKey, mutationType, payload, noticeText = "Queued for sync") => {
+      if (!token || !storageReady) return false;
 
       setBusyAction(actionKey);
       setNotice("");
       setError("");
 
       try {
-        await fn();
-        if (!skipRefresh) {
-          await refreshSnapshot(token, { silent: true });
-        }
-        setNotice(noticeText);
+        enqueueMutation(mutationType, payload, actionKey, noticeText);
+        setNotice(`${noticeText} (pending sync)`);
         return true;
       } catch (actionError) {
         setError(actionError.message || "Action failed");
@@ -236,126 +583,80 @@ export default function App() {
         setBusyAction("");
       }
     },
-    [token, refreshSnapshot]
+    [token, enqueueMutation, storageReady]
   );
 
   const actions = useMemo(() => {
     return {
       createOrder: (payload) =>
-        runAction(
-          "createOrder",
-          async () => {
-            const currentToken = window.localStorage.getItem(TOKEN_KEY) || token;
-            const created = await api.createOrder(currentToken, payload);
-            const orderId = created?.order?.order_id;
-            if (orderId) {
-              try {
-                await api.extractOrder(currentToken, { order_id: orderId });
-              } catch (error) {
-                console.warn("Auto extract failed after order create:", error);
-              }
-            }
-            return created;
-          },
-          "Order created"
-        ),
+        runAction("createOrder", "createOrder", payload, "Order queued"),
       updateOrder: (payload) =>
         runAction(
           payload.status === "delivered" ? `deliver:${payload.order_id}` : "updateOrder",
-          async () => {
-            const currentToken = window.localStorage.getItem(TOKEN_KEY) || token;
-            return api.updateOrder(currentToken, payload);
-          },
-          "Order updated"
+          "updateOrder",
+          payload,
+          "Order update queued"
         ),
       markPieceCut: (payload) =>
-        runAction(
-          `cut:${payload.piece_id}`,
-          async () => {
-            const currentToken = window.localStorage.getItem(TOKEN_KEY) || token;
-            return api.markPieceCut(currentToken, payload);
-          },
-          "Piece marked cut"
-        ),
+        runAction(`cut:${payload.piece_id}`, "markPieceCut", payload, "Cutting update queued"),
       extractOrder: (payload) =>
-        runAction(`extract:${payload.order_id}`, () => api.extractOrder(token, payload), "Pieces extracted"),
+        runAction(`extract:${payload.order_id}`, "extractOrder", payload, "Extract queued"),
       approvePiece: (payload) =>
-        runAction(`approve:${payload.piece_id}`, () => api.approvePiece(token, payload), "Piece approved"),
+        runAction(`approve:${payload.piece_id}`, "approvePiece", payload, "Approval queued"),
       syncPayroll: (payload) =>
-        runAction("syncPayroll", () => api.syncPayroll(token, payload), "Payroll synced"),
+        runAction("syncPayroll", "syncPayroll", payload, "Payroll sync queued"),
       generateInvoice: (payload) =>
-        runAction("generateInvoice", () => api.generateInvoice(token, payload), "Invoice generated"),
+        runAction("generateInvoice", "generateInvoice", payload, "Invoice queued"),
       saveProduct: (payload) =>
-        runAction("saveProduct", () => api.saveProduct(token, payload), "Product saved"),
+        runAction("saveProduct", "saveProduct", payload, "Product queued"),
       saveSubProduct: (payload) =>
-        runAction("saveSubProduct", () => api.saveSubProduct(token, payload), "Sub-product saved"),
+        runAction("saveSubProduct", "saveSubProduct", payload, "Sub-product queued"),
 
       assignPiece: (payload) =>
-        runAction(
-          `assign:${payload.piece_id}`,
-          async () => {
-            const currentToken = window.localStorage.getItem(TOKEN_KEY) || token;
-            return api.assignPiece(currentToken, payload);
-          },
-          "Work assigned"
-        ),
+        runAction(`assign:${payload.piece_id}`, "assignPiece", payload, "Assignment queued"),
       completePiece: (payload) =>
-        runAction(
-          `complete:${payload.piece_id}`,
-          async () => {
-            const currentToken = window.localStorage.getItem(TOKEN_KEY) || token;
-            return api.requestApproval(currentToken, payload);
-          },
-          "Request Submitted"
-        ),
+        runAction(`complete:${payload.piece_id}`, "completePiece", payload, "Completion queued"),
 
       createShop: (payload) =>
-        runAction("createShop", () => api.createShop(token, payload), "Shop created"),
+        runAction("createShop", "createShop", payload, "Shop queued"),
       updateShop: (payload) =>
-        runAction("updateShop", () => api.updateShop(token, payload), "Shop updated"),
+        runAction("updateShop", "updateShop", payload, "Shop update queued"),
       createKarigar: (payload) =>
-        runAction("createKarigar", () => api.createKarigar(token, payload), "Karigar created"),
+        runAction("createKarigar", "createKarigar", payload, "Karigar queued"),
       updateKarigar: (payload) =>
-        runAction("updateKarigar", () => api.updateKarigar(token, payload), "Karigar updated"),
+        runAction("updateKarigar", "updateKarigar", payload, "Karigar update queued"),
 
       saveShopRates: (payload) =>
-        runAction("saveShopRates", () => api.saveShopRates(token, payload), "Shop rate saved"),
+        runAction("saveShopRates", "saveSettings", payload, "Shop rates queued"),
       saveKarigarRates: (payload) =>
-        runAction(
-          "saveKarigarRates",
-          () => api.saveKarigarRates(token, payload),
-          "Karigar rate saved"
-        ),
+        runAction("saveKarigarRates", "saveSettings", payload, "Karigar rates queued"),
 
       createShopPayment: (payload) =>
-        runAction(
-          "createShopPayment",
-          () => api.createShopPayment(token, payload),
-          "Shop payment recorded"
-        ),
+        runAction("createShopPayment", "createShopPayment", payload, "Shop payment queued"),
       createKarigarPayment: (payload) =>
         runAction(
           "createKarigarPayment",
-          () => api.createKarigarPayment(token, payload),
-          "Karigar payment recorded"
+          "createKarigarPayment",
+          payload,
+          "Karigar payment queued"
         ),
 
       createUser: (payload) =>
-        runAction("createUser", () => api.createUser(token, payload), "User created"),
+        runAction("createUser", "createUser", payload, "User queued"),
       updateUser: (payload) =>
-        runAction("updateUser", () => api.updateUser(token, payload), "User updated"),
+        runAction("updateUser", "updateUser", payload, "User update queued"),
       deleteUser: (payload) =>
-        runAction(
-          `deleteUser:${payload.username}`,
-          () => api.deleteUser(token, payload),
-          "User deleted"
-        ),
+        runAction(`deleteUser:${payload.username}`, "deleteUser", payload, "User delete queued"),
 
       saveSettings: (payload) =>
-        runAction("saveSettings", () => api.saveSettings(token, payload), "Setting saved"),
-      refresh: () => refreshSnapshot(token)
+        runAction("saveSettings", "saveSettings", payload, "Setting queued"),
+      clearAllData: () => runAction("clearAllData", "clearAllData", {}, "Delete-all queued"),
+      refresh: async () => {
+        await flushQueuedMutations({ force: true });
+        return refreshSnapshot(token);
+      }
     };
-  }, [token, runAction, refreshSnapshot]);
+  }, [token, runAction, refreshSnapshot, flushQueuedMutations]);
 
   const handleLogin = async (credentials) => {
     setLoading(true);
@@ -403,18 +704,23 @@ export default function App() {
         </div>
       </header>
 
-      <SyncBar lastSynced={lastSynced} offline={offline} />
+      <SyncBar
+        lastSynced={lastSynced}
+        offline={offline}
+        pendingCount={pendingMutations.length}
+        flushInProgress={syncMeta.flushInProgress}
+      />
 
       {error ? <div className="alert error">{error}</div> : null}
       {notice ? <div className="alert success">{notice}</div> : null}
 
-      {loading ? <p className="muted">Loading latest data...</p> : null}
+      {loading || (token && !storageReady) ? <p className="muted">Loading latest data...</p> : null}
 
-      {!loading && user?.role === "admin" ? (
+      {!loading && storageReady && user?.role === "admin" ? (
         <AdminApp data={{ ...data, settings }} actions={actions} busyAction={busyAction} />
       ) : null}
 
-      {!loading && user?.role === "karigar" ? (
+      {!loading && storageReady && user?.role === "karigar" ? (
         <KarigarApp
           user={user}
           data={data}
@@ -423,8 +729,8 @@ export default function App() {
         />
       ) : null}
 
-      {!loading && user?.role === "shop" ? <ShopApp user={user} data={data} /> : null}
-      {!loading && user?.role === "cutting" ? (
+      {!loading && storageReady && user?.role === "shop" ? <ShopApp user={user} data={data} /> : null}
+      {!loading && storageReady && user?.role === "cutting" ? (
         <CuttingApp
           data={data}
           onUploadCuttingPhoto={(payload) => actions.markPieceCut(payload)}

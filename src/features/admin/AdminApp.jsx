@@ -701,6 +701,14 @@ export function AdminApp({ data, actions, busyAction }) {
     }
   };
 
+  const handleDeleteAllData = async () => {
+    const confirmed = window.confirm(
+      "Delete all application data from Google Sheet and clear local cache after sync?"
+    );
+    if (!confirmed) return;
+    await actions.clearAllData();
+  };
+
   return (
     <div className="role-shell">
       <div className="tab-row wrap">
@@ -2490,6 +2498,20 @@ export function AdminApp({ data, actions, busyAction }) {
                   ))}
                 </tbody>
               </table>
+            </div>
+            <div className="panel inset warning-box" style={{ marginTop: "1rem" }}>
+              <h3>Danger Zone</h3>
+              <p className="muted">
+                This is hidden under Settings to prevent accidental deletion.
+              </p>
+              <button
+                type="button"
+                className="button danger"
+                onClick={handleDeleteAllData}
+                disabled={busyAction === "clearAllData"}
+              >
+                {busyAction === "clearAllData" ? "Queueing..." : "Delete All Data"}
+              </button>
             </div>
           </form>
         </section>
