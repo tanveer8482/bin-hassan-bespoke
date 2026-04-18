@@ -409,11 +409,17 @@ export default function App() {
         case "updateShop":
           await api.updateShop(currentToken, payload);
           return;
+        case "deleteShop":
+          await api.deleteShop(currentToken, payload);
+          return;
         case "createKarigar":
           await api.createKarigar(currentToken, payload);
           return;
         case "updateKarigar":
           await api.updateKarigar(currentToken, payload);
+          return;
+        case "deleteKarigar":
+          await api.deleteKarigar(currentToken, payload);
           return;
         case "createShopPayment":
           await api.createShopPayment(currentToken, payload);
@@ -621,10 +627,19 @@ export default function App() {
         runAction("createShop", "createShop", payload, "Shop queued"),
       updateShop: (payload) =>
         runAction("updateShop", "updateShop", payload, "Shop update queued"),
+      deleteShop: (payload) =>
+        runAction(`deleteShop:${payload.shop_id}`, "deleteShop", payload, "Shop delete queued"),
       createKarigar: (payload) =>
         runAction("createKarigar", "createKarigar", payload, "Karigar queued"),
       updateKarigar: (payload) =>
         runAction("updateKarigar", "updateKarigar", payload, "Karigar update queued"),
+      deleteKarigar: (payload) =>
+        runAction(
+          `deleteKarigar:${payload.karigar_id}`,
+          "deleteKarigar",
+          payload,
+          "Karigar delete queued"
+        ),
 
       saveShopRates: (payload) =>
         runAction("saveShopRates", "saveSettings", payload, "Shop rates queued"),

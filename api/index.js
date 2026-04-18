@@ -15,7 +15,9 @@ const {
   appendRecord,
   appendRecords,
   appendRecordsBatch,
+  deleteByField,
   ensureWorkbook,
+  getManyRecords,
   getRecords,
   updateByField,
   updateMany,
@@ -104,6 +106,52 @@ async function handleLogin(req, res) {
 function stripMeta(record) {
   const { __rowNumber, ...rest } = record;
   return rest;
+}
+
+function findLinkedEntityUser(users, role, entityId, fallbackName = "") {
+  const fallbackKey = normalizeKey(fallbackName);
+  return (users || []).find((entry) => {
+    if (normalizeKey(entry.role) !== normalizeKey(role)) return false;
+    if (entityId && normalizeKey(entry.entity_id) === normalizeKey(entityId)) return true;
+    if (!fallbackKey) return false;
+    return (
+      normalizeKey(entry.display_name) === fallbackKey ||
+      normalizeKey(entry.username) === fallbackKey
+    );
+  });
+}
+
+function assertUniqueUsername(users, username, ignoreUsername = "") {
+  const usernameKey = normalizeKey(username);
+  const ignoreKey = normalizeKey(ignoreUsername);
+  const duplicate = (users || []).find(
+    (entry) =>
+      normalizeKey(entry.username) === usernameKey &&
+      normalizeKey(entry.username) !== ignoreKey
+  );
+  if (duplicate) {
+    const error = new Error(`Username already exists: ${username}`);
+    error.statusCode = 400;
+    throw error;
+  }
+}
+
+function assertUniqueField(records, field, value, ignoreField = "", ignoreValue = "") {
+  const valueKey = normalizeKey(value);
+  const ignoreKey = normalizeKey(ignoreValue);
+  const duplicate = (records || []).find((entry) => {
+    if (normalizeKey(entry[field]) !== valueKey) return false;
+    if (ignoreField && ignoreKey && normalizeKey(entry[ignoreField]) === ignoreKey) {
+      return false;
+    }
+    return true;
+  });
+
+  if (duplicate) {
+    const error = new Error(`${field} already exists: ${value}`);
+    error.statusCode = 400;
+    throw error;
+  }
 }
 
 // ============ ME & SNAPSHOT ============
@@ -395,32 +443,336 @@ async function handleProductSubProducts(req, res) {
 // ============ SHOPS, KARIGAR, USERS, PAYMENTS ============
 
 async function handleShops(req, res) {
-  ensureMethod(req, ["GET", "POST", "PATCH"]);
+  ensureMethod(req, ["GET", "POST", "PATCH", "DELETE"]);
   const user = requireAuth(req);
-  if (req.method === "GET") return listShops(res, user);
+  if (req.method === "GET") return sendOk(res, await getRecords(SHEETS.SHOPS));
   requireRole(user, [ROLES.ADMIN]);
   const body = await parseBody(req);
+
   if (req.method === "POST") {
-    const record = { shop_id: id("shop"), shop_name: normalizeText(body.shop_name), contact: normalizeText(body.contact || ""), created_date: nowISO() };
-    await appendRecord(SHEETS.SHOPS, record);
-    return sendOk(res, { message: "Shop created", record });
+    requireFields(body, ["shop_name", "password"]);
+    const shopName = normalizeText(body.shop_name);
+    const username = shopName;
+    const now = nowISO();
+    const { [SHEETS.SHOPS]: shops, [SHEETS.USERS]: users } = await getManyRecords([
+      SHEETS.SHOPS,
+      SHEETS.USERS
+    ]);
+
+    assertUniqueField(shops, "shop_name", shopName);
+    assertUniqueUsername(users, username);
+
+    const shopId = id("shop");
+    const record = {
+      shop_id: shopId,
+      shop_name: shopName,
+      contact: normalizeText(body.contact || ""),
+      created_date: now
+    };
+    const userRecord = {
+      username,
+      password: await bcrypt.hash(String(body.password), 10),
+      role: ROLES.SHOP,
+      display_name: shopName,
+      entity_id: shopId
+    };
+
+    console.log("[ACCOUNT] Creating linked shop account", { shop_id: shopId, username });
+    await appendRecordsBatch([
+      { tabName: SHEETS.SHOPS, records: [record] },
+      { tabName: SHEETS.USERS, records: [userRecord] }
+    ]);
+    return sendOk(res, {
+      message: "Shop created with login account",
+      record,
+      user: stripPrivateUser(userRecord)
+    });
   }
-  const updated = await updateByField(SHEETS.SHOPS, "shop_id", body.shop_id, { ...body });
+
+  if (req.method === "DELETE") {
+    requireFields(body, ["shop_id"]);
+    const {
+      [SHEETS.SHOPS]: shops,
+      [SHEETS.USERS]: users,
+      [SHEETS.ORDERS]: orders,
+      [SHEETS.PAYMENTS_SHOPS]: paymentsShops
+    } = await getManyRecords([
+      SHEETS.SHOPS,
+      SHEETS.USERS,
+      SHEETS.ORDERS,
+      SHEETS.PAYMENTS_SHOPS
+    ]);
+
+    const existingShop = shops.find((entry) => entry.shop_id === body.shop_id);
+    if (!existingShop) {
+      const error = new Error("Shop not found");
+      error.statusCode = 404;
+      throw error;
+    }
+
+    if (
+      orders.some((entry) => entry.shop_id === body.shop_id) ||
+      paymentsShops.some((entry) => entry.shop_id === body.shop_id)
+    ) {
+      const error = new Error("Cannot delete shop with linked orders or payments");
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const linkedUser = findLinkedEntityUser(
+      users,
+      ROLES.SHOP,
+      body.shop_id,
+      existingShop.shop_name
+    );
+
+    if (linkedUser) {
+      console.log("[ACCOUNT] Deleting linked shop account", {
+        shop_id: body.shop_id,
+        username: linkedUser.username
+      });
+      await deleteByField(SHEETS.USERS, "username", linkedUser.username);
+    }
+
+    await deleteByField(SHEETS.SHOPS, "shop_id", body.shop_id);
+    return sendOk(res, { message: "Shop deleted" });
+  }
+
+  requireFields(body, ["shop_id"]);
+  const { [SHEETS.SHOPS]: shops, [SHEETS.USERS]: users } = await getManyRecords([
+    SHEETS.SHOPS,
+    SHEETS.USERS
+  ]);
+  const existingShop = shops.find((entry) => entry.shop_id === body.shop_id);
+  if (!existingShop) {
+    const error = new Error("Shop not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const nextShopName = normalizeText(body.shop_name || existingShop.shop_name);
+  const nextContact =
+    body.contact === undefined ? existingShop.contact || "" : normalizeText(body.contact);
+
+  assertUniqueField(shops, "shop_name", nextShopName, "shop_id", body.shop_id);
+
+  const updated = await updateByField(SHEETS.SHOPS, "shop_id", body.shop_id, {
+    shop_name: nextShopName,
+    contact: nextContact
+  });
+
+  const linkedUser = findLinkedEntityUser(
+    users,
+    ROLES.SHOP,
+    body.shop_id,
+    existingShop.shop_name
+  );
+  const nextUsername = nextShopName;
+
+  if (linkedUser) {
+    assertUniqueUsername(users, nextUsername, linkedUser.username);
+    const userPatch = {
+      username: nextUsername,
+      role: ROLES.SHOP,
+      display_name: nextShopName,
+      entity_id: body.shop_id
+    };
+    if (body.password) {
+      userPatch.password = await bcrypt.hash(String(body.password), 10);
+    }
+    console.log("[ACCOUNT] Updating linked shop account", {
+      shop_id: body.shop_id,
+      username: nextUsername
+    });
+    await updateByField(SHEETS.USERS, "username", linkedUser.username, userPatch);
+  } else if (body.password) {
+    assertUniqueUsername(users, nextUsername);
+    const userRecord = {
+      username: nextUsername,
+      password: await bcrypt.hash(String(body.password), 10),
+      role: ROLES.SHOP,
+      display_name: nextShopName,
+      entity_id: body.shop_id
+    };
+    console.log("[ACCOUNT] Recreating missing shop account", {
+      shop_id: body.shop_id,
+      username: nextUsername
+    });
+    await appendRecord(SHEETS.USERS, userRecord);
+  }
+
   sendOk(res, { message: "Shop updated", record: updated });
 }
 
 async function handleKarigar(req, res) {
-  ensureMethod(req, ["GET", "POST", "PATCH"]);
+  ensureMethod(req, ["GET", "POST", "PATCH", "DELETE"]);
   const user = requireAuth(req);
   if (req.method === "GET") return sendOk(res, await getRecords(SHEETS.KARIGAR));
   requireRole(user, [ROLES.ADMIN]);
   const body = await parseBody(req);
+
   if (req.method === "POST") {
-    const record = { karigar_id: id("karigar"), name: normalizeText(body.name), contact: normalizeText(body.contact || ""), skills: normalizeText(body.skills || ""), created_date: nowISO() };
-    await appendRecord(SHEETS.KARIGAR, record);
-    return sendOk(res, { message: "Karigar created", record });
+    requireFields(body, ["name", "password"]);
+    const karigarName = normalizeText(body.name);
+    const username = karigarName;
+    const now = nowISO();
+    const { [SHEETS.KARIGAR]: karigars, [SHEETS.USERS]: users } = await getManyRecords([
+      SHEETS.KARIGAR,
+      SHEETS.USERS
+    ]);
+
+    assertUniqueField(karigars, "name", karigarName);
+    assertUniqueUsername(users, username);
+
+    const karigarId = id("karigar");
+    const record = {
+      karigar_id: karigarId,
+      name: karigarName,
+      contact: normalizeText(body.contact || ""),
+      skills: normalizeText(body.skills || ""),
+      is_active: "TRUE",
+      created_date: now,
+      updated_date: now
+    };
+    const userRecord = {
+      username,
+      password: await bcrypt.hash(String(body.password), 10),
+      role: ROLES.KARIGAR,
+      display_name: karigarName,
+      entity_id: karigarId
+    };
+
+    console.log("[ACCOUNT] Creating linked karigar account", {
+      karigar_id: karigarId,
+      username
+    });
+    await appendRecordsBatch([
+      { tabName: SHEETS.KARIGAR, records: [record] },
+      { tabName: SHEETS.USERS, records: [userRecord] }
+    ]);
+    return sendOk(res, {
+      message: "Karigar created with login account",
+      record,
+      user: stripPrivateUser(userRecord)
+    });
   }
-  const updated = await updateByField(SHEETS.KARIGAR, "karigar_id", body.karigar_id, { ...body });
+
+  if (req.method === "DELETE") {
+    requireFields(body, ["karigar_id"]);
+    const {
+      [SHEETS.KARIGAR]: karigars,
+      [SHEETS.USERS]: users,
+      [SHEETS.PIECES]: pieces,
+      [SHEETS.PAYMENTS_KARIGAR]: paymentsKarigar
+    } = await getManyRecords([
+      SHEETS.KARIGAR,
+      SHEETS.USERS,
+      SHEETS.PIECES,
+      SHEETS.PAYMENTS_KARIGAR
+    ]);
+
+    const existingKarigar = karigars.find((entry) => entry.karigar_id === body.karigar_id);
+    if (!existingKarigar) {
+      const error = new Error("Karigar not found");
+      error.statusCode = 404;
+      throw error;
+    }
+
+    if (
+      pieces.some((entry) => entry.assigned_karigar_id === body.karigar_id) ||
+      paymentsKarigar.some((entry) => entry.karigar_id === body.karigar_id)
+    ) {
+      const error = new Error("Cannot delete karigar with linked work or payments");
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const linkedUser = findLinkedEntityUser(
+      users,
+      ROLES.KARIGAR,
+      body.karigar_id,
+      existingKarigar.name
+    );
+
+    if (linkedUser) {
+      console.log("[ACCOUNT] Deleting linked karigar account", {
+        karigar_id: body.karigar_id,
+        username: linkedUser.username
+      });
+      await deleteByField(SHEETS.USERS, "username", linkedUser.username);
+    }
+
+    await deleteByField(SHEETS.KARIGAR, "karigar_id", body.karigar_id);
+    return sendOk(res, { message: "Karigar deleted" });
+  }
+
+  requireFields(body, ["karigar_id"]);
+  const { [SHEETS.KARIGAR]: karigars, [SHEETS.USERS]: users } = await getManyRecords([
+    SHEETS.KARIGAR,
+    SHEETS.USERS
+  ]);
+  const existingKarigar = karigars.find((entry) => entry.karigar_id === body.karigar_id);
+  if (!existingKarigar) {
+    const error = new Error("Karigar not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const nextKarigarName = normalizeText(body.name || existingKarigar.name);
+  const nextContact =
+    body.contact === undefined ? existingKarigar.contact || "" : normalizeText(body.contact);
+  const nextSkills =
+    body.skills === undefined ? existingKarigar.skills || "" : normalizeText(body.skills);
+
+  assertUniqueField(karigars, "name", nextKarigarName, "karigar_id", body.karigar_id);
+
+  const updated = await updateByField(SHEETS.KARIGAR, "karigar_id", body.karigar_id, {
+    name: nextKarigarName,
+    contact: nextContact,
+    skills: nextSkills,
+    updated_date: nowISO()
+  });
+
+  const linkedUser = findLinkedEntityUser(
+    users,
+    ROLES.KARIGAR,
+    body.karigar_id,
+    existingKarigar.name
+  );
+  const nextUsername = nextKarigarName;
+
+  if (linkedUser) {
+    assertUniqueUsername(users, nextUsername, linkedUser.username);
+    const userPatch = {
+      username: nextUsername,
+      role: ROLES.KARIGAR,
+      display_name: nextKarigarName,
+      entity_id: body.karigar_id
+    };
+    if (body.password) {
+      userPatch.password = await bcrypt.hash(String(body.password), 10);
+    }
+    console.log("[ACCOUNT] Updating linked karigar account", {
+      karigar_id: body.karigar_id,
+      username: nextUsername
+    });
+    await updateByField(SHEETS.USERS, "username", linkedUser.username, userPatch);
+  } else if (body.password) {
+    assertUniqueUsername(users, nextUsername);
+    const userRecord = {
+      username: nextUsername,
+      password: await bcrypt.hash(String(body.password), 10),
+      role: ROLES.KARIGAR,
+      display_name: nextKarigarName,
+      entity_id: body.karigar_id
+    };
+    console.log("[ACCOUNT] Recreating missing karigar account", {
+      karigar_id: body.karigar_id,
+      username: nextUsername
+    });
+    await appendRecord(SHEETS.USERS, userRecord);
+  }
+
   sendOk(res, { message: "Karigar updated", record: updated });
 }
 
@@ -437,7 +789,22 @@ async function handleUsers(req, res) {
     return sendOk(res, { message: "User created", user: stripPrivateUser(record) });
   }
   if (req.method === "DELETE") {
-    await updateByField(SHEETS.USERS, "username", body.username, { role: "deleted" });
+    requireFields(body, ["username"]);
+    const users = await getRecords(SHEETS.USERS);
+    const targetUser = users.find(
+      (entry) => normalizeKey(entry.username) === normalizeKey(body.username)
+    );
+    if (!targetUser) {
+      const error = new Error("User not found");
+      error.statusCode = 404;
+      throw error;
+    }
+    if (normalizeKey(targetUser.role) === normalizeKey(ROLES.ADMIN)) {
+      const error = new Error("Admin user cannot be deleted");
+      error.statusCode = 400;
+      throw error;
+    }
+    await deleteByField(SHEETS.USERS, "username", body.username);
     return sendOk(res, { message: "User deleted" });
   }
   const patch = { ...body };
@@ -508,9 +875,11 @@ const handlers = {
   listShops: withErrorHandler(async (req, res) => { req.method = 'GET'; return handleShops(req, res); }),
   createShop: withErrorHandler(async (req, res) => { req.method = 'POST'; return handleShops(req, res); }),
   updateShop: withErrorHandler(async (req, res) => { req.method = 'PATCH'; return handleShops(req, res); }),
+  deleteShop: withErrorHandler(async (req, res) => { req.method = 'DELETE'; return handleShops(req, res); }),
   listKarigar: withErrorHandler(async (req, res) => { req.method = 'GET'; return handleKarigar(req, res); }),
   createKarigar: withErrorHandler(async (req, res) => { req.method = 'POST'; return handleKarigar(req, res); }),
   updateKarigar: withErrorHandler(async (req, res) => { req.method = 'PATCH'; return handleKarigar(req, res); }),
+  deleteKarigar: withErrorHandler(async (req, res) => { req.method = 'DELETE'; return handleKarigar(req, res); }),
   listProducts: withErrorHandler(async (req, res) => { req.method = 'GET'; return handleProducts(req, res); }),
   saveProduct: withErrorHandler(async (req, res) => { req.method = 'POST'; return handleProducts(req, res); }),
   listSubProducts: withErrorHandler(async (req, res) => { req.method = 'GET'; return handleProductSubProducts(req, res); }),

@@ -153,8 +153,13 @@ export function AdminApp({ data, actions, busyAction }) {
 
   const [assignDraft, setAssignDraft] = useState({});
 
-  const [shopForm, setShopForm] = useState({ shop_name: "", contact: "" });
-  const [shopEditForm, setShopEditForm] = useState({ shop_id: "", shop_name: "", contact: "" });
+  const [shopForm, setShopForm] = useState({ shop_name: "", contact: "", password: "" });
+  const [shopEditForm, setShopEditForm] = useState({
+    shop_id: "",
+    shop_name: "",
+    contact: "",
+    password: ""
+  });
   const [shopRateForm, setShopRateForm] = useState({
     shop_id: "",
     piece_name: "coat",
@@ -162,11 +167,12 @@ export function AdminApp({ data, actions, busyAction }) {
     rate: ""
   });
 
-  const [karigarForm, setKarigarForm] = useState({ name: "", contact: "" });
+  const [karigarForm, setKarigarForm] = useState({ name: "", contact: "", password: "" });
   const [karigarEditForm, setKarigarEditForm] = useState({
     karigar_id: "",
     name: "",
-    contact: ""
+    contact: "",
+    password: ""
   });
   const [karigarRateForm, setKarigarRateForm] = useState({
     karigar_id: "",
@@ -188,22 +194,6 @@ export function AdminApp({ data, actions, busyAction }) {
     note: ""
   });
 
-  const [userCreateForm, setUserCreateForm] = useState({
-    username: "",
-    password: "",
-    role: "shop",
-    display_name: "",
-    entity_id: ""
-  });
-  const [userUpdateForm, setUserUpdateForm] = useState({
-    username: "",
-    new_username: "",
-    password: "",
-    role: "",
-    display_name: "",
-    entity_id: ""
-  });
-
   const [settingsTab, setSettingsTab] = useState("products");
   const [productForm, setProductForm] = useState({ product_name: "", shop_name: "", shop_rate: "", cutting_rate: "" });
   const [subProductForm, setSubProductForm] = useState({ product_id: "", sub_product_name: "", worker_rate: "" });
@@ -213,6 +203,14 @@ export function AdminApp({ data, actions, busyAction }) {
   const [trackOrderId, setTrackOrderId] = useState("");
 
   const shopsById = useMemo(() => byId(data.shops, "shop_id"), [data.shops]);
+  const shopUsersByEntityId = useMemo(() => {
+    return (data.users || []).reduce((map, entry) => {
+      if (entry.role === "shop" && entry.entity_id) {
+        map[entry.entity_id] = entry;
+      }
+      return map;
+    }, {});
+  }, [data.users]);
   const productsForSelectedShop = useMemo(() => {
     const selectedShopName = shopsById[orderForm.shop_id]?.shop_name;
     if (!selectedShopName) return [];
@@ -220,6 +218,14 @@ export function AdminApp({ data, actions, busyAction }) {
   }, [data.products, orderForm.shop_id, shopsById]);
 
   const karigarById = useMemo(() => byId(data.karigars, "karigar_id"), [data.karigars]);
+  const karigarUsersByEntityId = useMemo(() => {
+    return (data.users || []).reduce((map, entry) => {
+      if (entry.role === "karigar" && entry.entity_id) {
+        map[entry.entity_id] = entry;
+      }
+      return map;
+    }, {});
+  }, [data.users]);
 
   const orderItemsByOrder = useMemo(() => {
     return data.orderItems.reduce((map, item) => {
@@ -568,14 +574,14 @@ export function AdminApp({ data, actions, busyAction }) {
   const submitShop = async (event) => {
     event.preventDefault();
     const ok = await actions.createShop(shopForm);
-    if (ok) setShopForm({ shop_name: "", contact: "" });
+    if (ok) setShopForm({ shop_name: "", contact: "", password: "" });
   };
 
   const submitShopUpdate = async (event) => {
     event.preventDefault();
     const ok = await actions.updateShop(shopEditForm);
     if (ok) {
-      setShopEditForm({ shop_id: "", shop_name: "", contact: "" });
+      setShopEditForm({ shop_id: "", shop_name: "", contact: "", password: "" });
     }
   };
 
@@ -595,14 +601,14 @@ export function AdminApp({ data, actions, busyAction }) {
   const submitKarigar = async (event) => {
     event.preventDefault();
     const ok = await actions.createKarigar(karigarForm);
-    if (ok) setKarigarForm({ name: "", contact: "" });
+    if (ok) setKarigarForm({ name: "", contact: "", password: "" });
   };
 
   const submitKarigarUpdate = async (event) => {
     event.preventDefault();
     const ok = await actions.updateKarigar(karigarEditForm);
     if (ok) {
-      setKarigarEditForm({ karigar_id: "", name: "", contact: "" });
+      setKarigarEditForm({ karigar_id: "", name: "", contact: "", password: "" });
     }
   };
 
@@ -646,50 +652,6 @@ export function AdminApp({ data, actions, busyAction }) {
     }
   };
 
-  const submitUserCreate = async (event) => {
-    event.preventDefault();
-    const payload = {
-      ...userCreateForm,
-      entity_id: ["admin", "cutting"].includes(userCreateForm.role) ? "" : userCreateForm.entity_id
-    };
-    const ok = await actions.createUser(payload);
-    if (ok) {
-      setUserCreateForm({
-        username: "",
-        password: "",
-        role: "shop",
-        display_name: "",
-        entity_id: ""
-      });
-    }
-  };
-
-  const submitUserUpdate = async (event) => {
-    event.preventDefault();
-
-    const payload = {
-      username: userUpdateForm.username
-    };
-
-    if (userUpdateForm.new_username) payload.new_username = userUpdateForm.new_username;
-    if (userUpdateForm.password) payload.password = userUpdateForm.password;
-    if (userUpdateForm.role) payload.role = userUpdateForm.role;
-    if (userUpdateForm.display_name) payload.display_name = userUpdateForm.display_name;
-    if (userUpdateForm.entity_id) payload.entity_id = userUpdateForm.entity_id;
-
-    const ok = await actions.updateUser(payload);
-    if (ok) {
-      setUserUpdateForm({
-        username: "",
-        new_username: "",
-        password: "",
-        role: "",
-        display_name: "",
-        entity_id: ""
-      });
-    }
-  };
-
   const submitSetting = async (event) => {
     event.preventDefault();
     const ok = await actions.saveSettings({
@@ -707,6 +669,30 @@ export function AdminApp({ data, actions, busyAction }) {
     );
     if (!confirmed) return;
     await actions.clearAllData();
+  };
+
+  const handleDeleteShop = async () => {
+    if (!shopEditForm.shop_id) return;
+    const confirmed = window.confirm(
+      `Delete shop "${shopEditForm.shop_name}" and its login account?`
+    );
+    if (!confirmed) return;
+    const ok = await actions.deleteShop({ shop_id: shopEditForm.shop_id });
+    if (ok) {
+      setShopEditForm({ shop_id: "", shop_name: "", contact: "", password: "" });
+    }
+  };
+
+  const handleDeleteKarigar = async () => {
+    if (!karigarEditForm.karigar_id) return;
+    const confirmed = window.confirm(
+      `Delete karigar "${karigarEditForm.name}" and its login account?`
+    );
+    if (!confirmed) return;
+    const ok = await actions.deleteKarigar({ karigar_id: karigarEditForm.karigar_id });
+    if (ok) {
+      setKarigarEditForm({ karigar_id: "", name: "", contact: "", password: "" });
+    }
   };
 
   return (
@@ -1390,6 +1376,9 @@ export function AdminApp({ data, actions, busyAction }) {
           <div className="split-grid">
             <form className="panel inset" onSubmit={submitShop}>
               <h3>Add Shop</h3>
+              <p className="muted">
+                Login username will be the same as the shop name.
+              </p>
               <label>
                 Shop Name
                 <input
@@ -1417,6 +1406,21 @@ export function AdminApp({ data, actions, busyAction }) {
                   }
                 />
               </label>
+              <label>
+                Login Password
+                <input
+                  type="password"
+                  className="input"
+                  value={shopForm.password}
+                  onChange={(event) =>
+                    setShopForm((current) => ({
+                      ...current,
+                      password: event.target.value
+                    }))
+                  }
+                  required
+                />
+              </label>
               <button className="button" type="submit">
                 Save Shop
               </button>
@@ -1436,7 +1440,8 @@ export function AdminApp({ data, actions, busyAction }) {
                     setShopEditForm({
                       shop_id: selected?.shop_id || "",
                       shop_name: selected?.shop_name || "",
-                      contact: selected?.contact || ""
+                      contact: selected?.contact || "",
+                      password: ""
                     });
                   }}
                 >
@@ -1474,8 +1479,33 @@ export function AdminApp({ data, actions, busyAction }) {
                   }
                 />
               </label>
+              <p className="muted">
+                Login username: {shopUsersByEntityId[shopEditForm.shop_id]?.username || shopEditForm.shop_name || "-"}
+              </p>
+              <label>
+                Reset Password (optional)
+                <input
+                  type="password"
+                  className="input"
+                  value={shopEditForm.password}
+                  onChange={(event) =>
+                    setShopEditForm((current) => ({
+                      ...current,
+                      password: event.target.value
+                    }))
+                  }
+                />
+              </label>
               <button className="button" type="submit" disabled={!shopEditForm.shop_id}>
                 Update Shop
+              </button>
+              <button
+                className="button danger ghost"
+                type="button"
+                onClick={handleDeleteShop}
+                disabled={!shopEditForm.shop_id || busyAction === `deleteShop:${shopEditForm.shop_id}`}
+              >
+                {busyAction === `deleteShop:${shopEditForm.shop_id}` ? "Deleting..." : "Delete Shop"}
               </button>
             </form>
           </div>
@@ -1606,6 +1636,9 @@ export function AdminApp({ data, actions, busyAction }) {
           <div className="split-grid">
             <form className="panel inset" onSubmit={submitKarigar}>
               <h3>Add Karigar</h3>
+              <p className="muted">
+                Login username will be the same as the karigar name.
+              </p>
               <label>
                 Name
                 <input
@@ -1633,6 +1666,21 @@ export function AdminApp({ data, actions, busyAction }) {
                   }
                 />
               </label>
+              <label>
+                Login Password
+                <input
+                  type="password"
+                  className="input"
+                  value={karigarForm.password}
+                  onChange={(event) =>
+                    setKarigarForm((current) => ({
+                      ...current,
+                      password: event.target.value
+                    }))
+                  }
+                  required
+                />
+              </label>
               <button className="button" type="submit">
                 Save Karigar
               </button>
@@ -1652,7 +1700,8 @@ export function AdminApp({ data, actions, busyAction }) {
                     setKarigarEditForm({
                       karigar_id: selected?.karigar_id || "",
                       name: selected?.name || "",
-                      contact: selected?.contact || ""
+                      contact: selected?.contact || "",
+                      password: ""
                     });
                   }}
                 >
@@ -1690,12 +1739,42 @@ export function AdminApp({ data, actions, busyAction }) {
                   }
                 />
               </label>
+              <p className="muted">
+                Login username: {karigarUsersByEntityId[karigarEditForm.karigar_id]?.username || karigarEditForm.name || "-"}
+              </p>
+              <label>
+                Reset Password (optional)
+                <input
+                  type="password"
+                  className="input"
+                  value={karigarEditForm.password}
+                  onChange={(event) =>
+                    setKarigarEditForm((current) => ({
+                      ...current,
+                      password: event.target.value
+                    }))
+                  }
+                />
+              </label>
               <button
                 className="button"
                 type="submit"
                 disabled={!karigarEditForm.karigar_id}
               >
                 Update Karigar
+              </button>
+              <button
+                className="button danger ghost"
+                type="button"
+                onClick={handleDeleteKarigar}
+                disabled={
+                  !karigarEditForm.karigar_id ||
+                  busyAction === `deleteKarigar:${karigarEditForm.karigar_id}`
+                }
+              >
+                {busyAction === `deleteKarigar:${karigarEditForm.karigar_id}`
+                  ? "Deleting..."
+                  : "Delete Karigar"}
               </button>
             </form>
           </div>
@@ -2210,230 +2289,12 @@ export function AdminApp({ data, actions, busyAction }) {
       ) : null}
       {tab === "settings" ? (
         <section className="panel">
-          <h2>Settings & Users</h2>
-
-          <div className="split-grid">
-            <form className="panel inset" onSubmit={submitUserCreate}>
-              <h3>Create User</h3>
-              <label>
-                Username
-                <input
-                  className="input"
-                  value={userCreateForm.username}
-                  onChange={(event) =>
-                    setUserCreateForm((current) => ({
-                      ...current,
-                      username: event.target.value
-                    }))
-                  }
-                  required
-                />
-              </label>
-              <label>
-                Password
-                <input
-                  type="password"
-                  className="input"
-                  value={userCreateForm.password}
-                  onChange={(event) =>
-                    setUserCreateForm((current) => ({
-                      ...current,
-                      password: event.target.value
-                    }))
-                  }
-                  required
-                />
-              </label>
-              <label>
-                Role
-                <select
-                  className="input"
-                  value={userCreateForm.role}
-                  onChange={(event) =>
-                    setUserCreateForm((current) => ({
-                      ...current,
-                      role: event.target.value
-                    }))
-                  }
-                >
-                  <option value="admin">Admin</option>
-                  <option value="karigar">Karigar</option>
-                  <option value="shop">Shop</option>
-                  <option value="cutting">Cutting Worker</option>
-                </select>
-              </label>
-              <label>
-                Display Name
-                <input
-                  className="input"
-                  value={userCreateForm.display_name}
-                  onChange={(event) =>
-                    setUserCreateForm((current) => ({
-                      ...current,
-                      display_name: event.target.value
-                    }))
-                  }
-                  required
-                />
-              </label>
-              <label>
-                Entity ID (shop_id / karigar_id)
-                <input
-                  className="input"
-                  value={userCreateForm.entity_id}
-                  onChange={(event) =>
-                    setUserCreateForm((current) => ({
-                      ...current,
-                      entity_id: event.target.value
-                    }))
-                  }
-                  disabled={["admin", "cutting"].includes(userCreateForm.role)}
-                />
-              </label>
-              <button className="button" type="submit">
-                Save User
-              </button>
-            </form>
-
-            <form className="panel inset" onSubmit={submitUserUpdate}>
-              <h3>Edit User</h3>
-              <label>
-                Select User
-                <select
-                  className="input"
-                  value={userUpdateForm.username}
-                  onChange={(event) =>
-                    setUserUpdateForm((current) => ({
-                      ...current,
-                      username: event.target.value
-                    }))
-                  }
-                  required
-                >
-                  <option value="">Select user</option>
-                  {data.users.map((entry) => (
-                    <option key={entry.username} value={entry.username}>
-                      {entry.username} ({entry.role})
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                New Username (optional)
-                <input
-                  className="input"
-                  value={userUpdateForm.new_username}
-                  onChange={(event) =>
-                    setUserUpdateForm((current) => ({
-                      ...current,
-                      new_username: event.target.value
-                    }))
-                  }
-                />
-              </label>
-              <label>
-                Reset Password (optional)
-                <input
-                  type="password"
-                  className="input"
-                  value={userUpdateForm.password}
-                  onChange={(event) =>
-                    setUserUpdateForm((current) => ({
-                      ...current,
-                      password: event.target.value
-                    }))
-                  }
-                />
-              </label>
-              <label>
-                New Role (optional)
-                <select
-                  className="input"
-                  value={userUpdateForm.role}
-                  onChange={(event) =>
-                    setUserUpdateForm((current) => ({
-                      ...current,
-                      role: event.target.value
-                    }))
-                  }
-                >
-                  <option value="">No change</option>
-                  <option value="admin">Admin</option>
-                  <option value="karigar">Karigar</option>
-                  <option value="shop">Shop</option>
-                  <option value="cutting">Cutting Worker</option>
-                </select>
-              </label>
-              <label>
-                Display Name (optional)
-                <input
-                  className="input"
-                  value={userUpdateForm.display_name}
-                  onChange={(event) =>
-                    setUserUpdateForm((current) => ({
-                      ...current,
-                      display_name: event.target.value
-                    }))
-                  }
-                />
-              </label>
-              <label>
-                Entity ID (optional)
-                <input
-                  className="input"
-                  value={userUpdateForm.entity_id}
-                  onChange={(event) =>
-                    setUserUpdateForm((current) => ({
-                      ...current,
-                      entity_id: event.target.value
-                    }))
-                  }
-                />
-              </label>
-              <button className="button" type="submit">
-                Update User
-              </button>
-            </form>
-          </div>
-
+          <h2>System Settings</h2>
           <div className="panel inset">
-            <h3>Current Users</h3>
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Username</th>
-                    <th>Role</th>
-                    <th>Display</th>
-                    <th>Entity</th>
-                    <th>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.users.map((entry) => (
-                    <tr key={entry.username}>
-                      <td>{entry.username}</td>
-                      <td>{entry.role}</td>
-                      <td>{entry.display_name || "-"}</td>
-                      <td>{entry.entity_id || "-"}</td>
-                      <td>
-                        {entry.role !== "admin" ? (
-                          <button
-                            className="button danger ghost small"
-                            onClick={() => actions.deleteUser({ username: entry.username })}
-                            disabled={busyAction === `deleteUser:${entry.username}`}
-                          >
-                            Delete
-                          </button>
-                        ) : (
-                          "-"
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <p className="muted">
+              Shop aur karigar accounts ab unke apne add/edit forms se manage honge.
+              Alag manual user creation hata di gayi hai.
+            </p>
           </div>
 
           <form className="panel inset" onSubmit={submitSetting}>

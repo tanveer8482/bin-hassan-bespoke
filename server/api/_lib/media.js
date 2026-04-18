@@ -20,9 +20,6 @@ function parseDataUrl(dataUrl) {
 
 async function uploadDataUrlToCloudinary(dataUrl, folder) {
   const env = getEnv();
-  // #region agent log
-  fetch('http://127.0.0.1:7303/ingest/470ad46e-749f-4aff-a2a7-ed436dce2a04',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'672361'},body:JSON.stringify({sessionId:'672361',runId:'pre-fix',hypothesisId:'H3',location:'server/api/_lib/media.js:24',message:'Signed Cloudinary upload config check',data:{hasCloudName:Boolean(env.cloudinaryCloudName),hasApiKey:Boolean(env.cloudinaryApiKey),hasApiSecret:Boolean(env.cloudinaryApiSecret),folder:folder||''},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
 
   if (
     !env.cloudinaryCloudName ||
@@ -59,9 +56,6 @@ async function uploadDataUrlToCloudinary(dataUrl, folder) {
   );
 
   const payload = await response.json().catch(() => ({}));
-  // #region agent log
-  fetch('http://127.0.0.1:7303/ingest/470ad46e-749f-4aff-a2a7-ed436dce2a04',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'672361'},body:JSON.stringify({sessionId:'672361',runId:'pre-fix',hypothesisId:'H3',location:'server/api/_lib/media.js:60',message:'Signed Cloudinary upload result',data:{ok:response.ok,status:response.status,errorMessage:payload?.error?.message||'',hasSecureUrl:Boolean(payload?.secure_url)},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
 
   if (!response.ok || !payload.secure_url) {
     const error = new Error(payload.error?.message || "Photo upload failed");
@@ -75,9 +69,6 @@ async function uploadDataUrlToCloudinary(dataUrl, folder) {
 async function resolvePhotoInput({ photoUrl, photoDataUrl, folder }) {
   const directUrl = normalizeText(photoUrl);
   const directData = normalizeText(photoDataUrl);
-  // #region agent log
-  fetch('http://127.0.0.1:7303/ingest/470ad46e-749f-4aff-a2a7-ed436dce2a04',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'672361'},body:JSON.stringify({sessionId:'672361',runId:'pre-fix',hypothesisId:'H4',location:'server/api/_lib/media.js:74',message:'Resolving photo input mode',data:{hasPhotoUrl:Boolean(directUrl),hasPhotoDataUrl:Boolean(directData),folder:folder||''},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
 
   if (directData) {
     const parsed = parseDataUrl(directData);

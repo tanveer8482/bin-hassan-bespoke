@@ -4,9 +4,6 @@ import { preparePhotoPayloadForApi } from "../../lib/api";
 
 export function CuttingApp({ data, onUploadCuttingPhoto, busyAction }) {
   const [uploadError, setUploadError] = useState("");
-  // #region agent log
-  fetch('http://127.0.0.1:7303/ingest/470ad46e-749f-4aff-a2a7-ed436dce2a04',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'672361'},body:JSON.stringify({sessionId:'672361',runId:'pre-fix',hypothesisId:'H6',location:'src/features/cutting/CuttingApp.jsx:8',message:'CuttingApp rendered',data:{piecesCount:Array.isArray(data?.pieces)?data.pieces.length:0,busyAction:busyAction||''},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
 
   const ordersById = useMemo(() => byId(data.orders, "order_id"), [data.orders]);
   const shopsById = useMemo(() => byId(data.shops, "shop_id"), [data.shops]);

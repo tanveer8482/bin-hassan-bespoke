@@ -374,12 +374,16 @@ export const api = {
     request("/index?action=createShop", { method: "POST", token, body }),
   updateShop: (token, body) =>
     request("/index?action=updateShop", { method: "PATCH", token, body }),
+  deleteShop: (token, body) =>
+    request("/index?action=deleteShop", { method: "DELETE", token, body }),
 
   listKarigar: (token) => request("/index?action=listKarigar", { token }),
   createKarigar: (token, body) =>
     request("/index?action=createKarigar", { method: "POST", token, body }),
   updateKarigar: (token, body) =>
     request("/index?action=updateKarigar", { method: "PATCH", token, body }),
+  deleteKarigar: (token, body) =>
+    request("/index?action=deleteKarigar", { method: "DELETE", token, body }),
 
   listProducts: (token) => request("/index?action=listProducts", { token }),
   saveProduct: (token, body) =>
@@ -411,5 +415,4 @@ export const api = {
   clearAllData: (token, body) =>
     request("/index?action=clearAllData", { method: "POST", token, body })
 };
-
 
