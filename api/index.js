@@ -386,7 +386,7 @@ async function syncPayroll(req, res) {
   if (!toSync.length) return sendOk(res, { message: "No pieces to sync" });
   const updates = toSync.map(p => ({ rowNumber: p.__rowNumber, record: { ...p, is_synced: "TRUE", sync_id: syncId, updated_date: nowISO() } }));
   await updateMany(SHEETS.PIECES, updates);
-  sendOk(res, { message: `${toSync.length} pieces synced`, sync_id: syncId });
+  sendOk(res, { message: `${toSync.length} pieces synced`, sync_id: syncId, syncedPieces: updates.map(u => u.record) });
 }
 
 async function generateInvoice(req, res) {

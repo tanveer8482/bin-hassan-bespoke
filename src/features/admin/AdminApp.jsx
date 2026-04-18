@@ -5,12 +5,19 @@ import {
   byId,
   filterTodayAndOverdue,
   formatCurrency,
+import { useMemo, useState, useCallback } from "react";
+import { StatusBadge } from "../../components/StatusBadge";
+import {
+  byId,
+  filterTodayAndOverdue,
+  formatCurrency,
   formatDate,
   normalizeBool,
   number,
   ORDER_STATUS_META,
   PIECE_STATUS_META
 } from "../../lib/format";
+import { generateMasterPayrollPdf } from "../../lib/pdfReport";
 import { preparePhotoPayloadForApi } from "../../lib/api";
 
 const PIECE_TYPES = ["coat", "pent", "waistcoat", "suit_2piece", "suit_3piece"];
@@ -228,223 +235,6 @@ export function AdminApp({ data, actions, busyAction }) {
   }, [data.users]);
 
   const ordersById = useMemo(() => byId(data.orders, "order_id"), [data.orders]);
-
-  const orderItemsByOrder = useMemo(() => {
-    return data.orderItems.reduce((map, item) => {
-      if (!map[item.order_id]) map[item.order_id] = [];
-      map[item.order_id].push(item);
-      return map;
-    }, {});
-  }, [data.orderItems]);
-
-  const piecesByOrder = useMemo(() => {
-    return data.pieces.reduce((map, piece) => {
-      if (!map[piece.order_id]) map[piece.order_id] = [];
-      map[piece.order_id].push(piece);
-      return map;
-    }, {});
-  }, [data.pieces]);
-
-  const debouncedSetOrderFilter = useCallback(
-    debounce((newFilter) => setOrderFilter(newFilter), 300),
-    []
-  );
-
-  const handleShopFilterChange = useCallback((value) => {
-    debouncedSetOrderFilter((current) => ({ ...current, shop_id: value }));
-  }, [debouncedSetOrderFilter]);
-
-  const handleStatusFilterChange = useCallback((value) => {
-    debouncedSetOrderFilter((current) => ({ ...current, status: value }));
-  }, [debouncedSetOrderFilter]);
-
-  const filteredOrders = useMemo(() => {
-    return data.orders.filter((order) => {
-      if (orderFilter.status !== "all" && order.status !== orderFilter.status) return false;
-      if (orderFilter.shop_id !== "all" && order.shop_id !== orderFilter.shop_id) return false;
-      return true;
-    });
-  }, [data.orders, orderFilter]);
-
-  const pendingCutPieces = useMemo(() => {
-    const rawPending = data.pieces.filter((piece) => !normalizeBool(piece.cutting_done));
-    const grouped = new Map();
-
-    rawPending.forEach((piece) => {
-      const key = piece.item_id || piece.piece_id;
-      if (!grouped.has(key)) {
-        grouped.set(key, {
-          ...piece,
-          _pendingCount: 0
-        });
-      }
-      grouped.get(key)._pendingCount += 1;
-    });
-
-    return Array.from(grouped.values());
-  }, [data.pieces]);
-
-  const assignablePieces = useMemo(() => {
-    return data.pieces.filter(
-      (piece) =>
-        normalizeBool(piece.cutting_done) && piece.karigar_status === "not_assigned"
-    );
-  }, [data.pieces]);
-
-  const dashboard = data.computed?.dashboard || {
-    total_active_orders: 0,
-    orders_ready_for_delivery: 0,
-    pieces_pending_cutting: 0,
-    pieces_assigned_pending_completion: 0,
-    overdue_orders: 0
-  };
-
-  const dueSummary = filterTodayAndOverdue(data.orders);
-  const trackSummary = useMemo(() => {
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-    const dayAfterTomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 2);
-
-    const overdue = [];
-    const dueToday = [];
-    const dueTomorrow = [];
-    const ready = [];
-
-    data.orders.forEach((order) => {
-      const pieces = piecesByOrder[order.order_id] || [];
-      const pendingPieces = pieces.filter((piece) => piece.karigar_status !== "complete");
-
-      if (!pendingPieces.length) {
-        ready.push(order);
-        return;
-      }
-
-      const delivery = new Date(order.delivery_date);
-      if (Number.isNaN(delivery.getTime())) return;
-
-      if (delivery < today) {
-        overdue.push(order);
-        return;
-      }
-
-      if (delivery >= today && delivery < tomorrow) {
-        dueToday.push(order);
-        return;
-      }
-
-      if (delivery >= tomorrow && delivery < dayAfterTomorrow) {
-        dueTomorrow.push(order);
-      }
-    });
-
-    return {
-      overdue,
-      dueToday,
-      dueTomorrow,
-      ready
-    };
-  }, [data.orders, piecesByOrder]);
-
-  const karigarDelayRows = useMemo(() => {
-    const now = new Date();
-
-    return data.karigars.map((karigar) => {
-      const assignedPieces = data.pieces.filter(
-        (piece) =>
-          piece.assigned_karigar_id === karigar.karigar_id &&
-          piece.karigar_status !== "complete"
-      );
-
-      const assignedDays = assignedPieces
-        .map((piece) => {
-          const assignedDate = new Date(piece.assigned_date || piece.updated_date || piece.created_date);
-          if (Number.isNaN(assignedDate.getTime())) return 0;
-          return Math.max(0, Math.floor((now - assignedDate) / (1000 * 60 * 60 * 24)));
-        })
-        .filter((value) => Number.isFinite(value));
-
-      const averageAssignedDays = assignedDays.length
-        ? assignedDays.reduce((sum, day) => sum + day, 0) / assignedDays.length
-        : 0;
-
-      const completedPieces = data.pieces.filter(
-        (piece) =>
-          piece.assigned_karigar_id === karigar.karigar_id &&
-          piece.karigar_status === "complete"
-      );
-
-      const weekAgo = new Date(now);
-      weekAgo.setDate(weekAgo.getDate() - 7);
-
-      const monthAgo = new Date(now);
-      monthAgo.setDate(monthAgo.getDate() - 30);
-
-      const completedThisWeek = completedPieces.filter((piece) => {
-        const date = new Date(piece.karigar_complete_date);
-        return !Number.isNaN(date.getTime()) && date >= weekAgo;
-      }).length;
-
-      const completedThisMonth = completedPieces.filter((piece) => {
-        const date = new Date(piece.karigar_complete_date);
-        return !Number.isNaN(date.getTime()) && date >= monthAgo;
-      }).length;
-
-      return {
-        karigar,
-        assignedNow: assignedPieces.length,
-        averageAssignedDays,
-        completedThisWeek,
-        completedThisMonth
-      };
-    });
-  }, [data.karigars, data.pieces]);
-
-  const selectedTrackOrderId = trackOrderId || data.orders[0]?.order_id || "";
-  const selectedTrackOrder = data.orders.find((order) => order.order_id === selectedTrackOrderId);
-  const selectedTrackPieces = piecesByOrder[selectedTrackOrderId] || [];
-
-  const submitOrder = async (event) => {
-    event.preventDefault();
-    const payload = {
-      ...orderForm,
-      designing_shop_charge: orderForm.designing_enabled
-        ? number(orderForm.designing_shop_charge)
-        : 0,
-      items: orderForm.items.map((item) => {
-        const product = data.products.find((p) => p.product_id === item.product_id);
-        return {
-          ...item,
-          piece_type: product?.product_name || item.piece_type || "",
-          item_rate: item.item_rate === "" ? undefined : number(item.item_rate)
-        };
-      })
-    };
-
-    const ok = await actions.createOrder(payload);
-    if (ok) {
-      setOrderForm(emptyOrderForm());
-      setTab("orders");
-    }
-  };
-
-  const handleSyncPayroll = async () => {
-    const confirmed = window.confirm(
-      "Sync all approved/completed pending pieces to payroll balances?"
-    );
-    if (!confirmed) return;
-
-    setSyncBusy(true);
-    try {
-      await actions.syncPayroll();
-    } finally {
-      setSyncBusy(false);
-    }
-  };
-
-
-  const selectSlipPhoto = async (file) => {
-    if (!file) return;
 
     try {
       const dataUrl = await compressImageFile(file, 1024, 300);

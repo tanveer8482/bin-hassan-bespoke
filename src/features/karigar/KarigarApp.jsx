@@ -8,6 +8,7 @@ import {
   PIECE_STATUS_META
 } from "../../lib/format";
 import { preparePhotoPayloadForApi } from "../../lib/api";
+import { generateKarigarLedgerPdf } from "../../lib/pdfReport";
 
 function pieceBadge(status) {
   return PIECE_STATUS_META[status] || { label: status, tone: "pending" };
@@ -97,6 +98,12 @@ export function KarigarApp({ user, data, onCompletePiece, busyAction }) {
           onClick={() => setTab("payments")}
         >
           My Payments
+        </button>
+        <button
+          className={tab === "ledger" ? "tab-button active" : "tab-button"}
+          onClick={() => setTab("ledger")}
+        >
+          My Ledger
         </button>
       </div>
 
@@ -206,7 +213,8 @@ export function KarigarApp({ user, data, onCompletePiece, busyAction }) {
             {!pieces.length ? <p className="muted">No pieces found for this filter.</p> : null}
           </div>
         </section>
-      ) : (
+        </section>
+      ) : tab === "payments" ? (
         <section className="panel">
           <h2>Payment Summary</h2>
           <div className="metrics-grid three">
@@ -252,6 +260,39 @@ export function KarigarApp({ user, data, onCompletePiece, busyAction }) {
                 ) : null}
               </tbody>
             </table>
+          </div>
+        </section>
+      ) : (
+        <section className="panel">
+          <div className="panel-head">
+            <h2>Detailed Financial Ledger</h2>
+            <button 
+              className="button success"
+              onClick={() => generateKarigarLedgerPdf(
+                { name: user.display_name },
+                visiblePieces,
+                paymentsKarigar
+              )}
+            >
+              Download My Ledger (PDF)
+            </button>
+          </div>
+          <p className="muted" style={{ marginBottom: '1.5rem' }}>
+            This report includes all your earnings from synced pieces and your payout history.
+          </p>
+          <div className="metrics-grid three">
+            <div className="metric-card">
+              <p>Total Life-time Earned</p>
+              <h3>{formatCurrency(paymentSummary.earned)}</h3>
+            </div>
+            <div className="metric-card">
+              <p>Total Life-time Received</p>
+              <h3>{formatCurrency(paymentSummary.paid)}</h3>
+            </div>
+            <div className="metric-card highlight">
+              <p>Current Balance</p>
+              <h3>{formatCurrency(paymentSummary.balance)}</h3>
+            </div>
           </div>
         </section>
       )}
