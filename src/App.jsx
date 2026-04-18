@@ -609,8 +609,16 @@ export default function App() {
         runAction(`extract:${payload.order_id}`, "extractOrder", payload, "Extract queued"),
       approvePiece: (payload) =>
         runAction(`approve:${payload.piece_id}`, "approvePiece", payload, "Approval queued"),
-      syncPayroll: (payload) =>
-        runAction("syncPayroll", "syncPayroll", payload, "Payroll sync queued"),
+      syncPayroll: async (payload) => {
+        setBusyAction("syncPayroll");
+        try {
+          const res = await api.syncPayroll(token, payload);
+          await refreshSnapshot(token, { silent: true });
+          return res;
+        } finally {
+          setBusyAction("");
+        }
+      },
       generateInvoice: (payload) =>
         runAction("generateInvoice", "generateInvoice", payload, "Invoice queued"),
       saveProduct: (payload) =>
@@ -755,7 +763,3 @@ export default function App() {
     </div>
   );
 }
-
-
-
-

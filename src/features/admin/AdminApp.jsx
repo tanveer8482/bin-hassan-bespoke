@@ -1,4 +1,4 @@
-﻿
+
 import { useMemo, useState, useCallback } from "react";
 import { StatusBadge } from "../../components/StatusBadge";
 import {
@@ -438,7 +438,9 @@ export function AdminApp({ data, actions, busyAction }) {
 
     setSyncBusy(true);
     try {
+      console.log("[ADMIN_SYNC] Clicked, calling actions.syncPayroll...");
       const result = await actions.syncPayroll();
+      console.log("[ADMIN_SYNC_RESULT]", result);
       if (result?.syncedPieces?.length > 0) {
         const total = result.syncedPieces.reduce((sum, p) => sum + (p.karigar_rate || 0), 0);
         generateMasterPayrollPdf(result.syncedPieces, total);
@@ -2423,35 +2425,3 @@ export function AdminApp({ data, actions, busyAction }) {
     </div>
   );
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
