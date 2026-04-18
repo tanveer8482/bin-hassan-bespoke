@@ -1,4 +1,4 @@
-﻿
+
 import { useMemo, useState, useCallback } from "react";
 import { StatusBadge } from "../../components/StatusBadge";
 import {
@@ -226,6 +226,8 @@ export function AdminApp({ data, actions, busyAction }) {
       return map;
     }, {});
   }, [data.users]);
+
+  const ordersById = useMemo(() => byId(data.orders, "order_id"), [data.orders]);
 
   const orderItemsByOrder = useMemo(() => {
     return data.orderItems.reduce((map, item) => {
@@ -673,6 +675,19 @@ export function AdminApp({ data, actions, busyAction }) {
 
   const handleDeleteShop = async () => {
     if (!shopEditForm.shop_id) return;
+
+    // Validation: prevent deletion if shop has non-delivered orders
+    const activeOrders = (data.orders || []).filter(
+      (o) => o.shop_id === shopEditForm.shop_id && o.status !== "delivered"
+    );
+
+    if (activeOrders.length > 0) {
+      window.alert(
+        `Cannot delete shop "${shopEditForm.shop_name}" because it has ${activeOrders.length} active (non-delivered) orders. Please deliver or cancel them first.`
+      );
+      return;
+    }
+
     const confirmed = window.confirm(
       `Delete shop "${shopEditForm.shop_name}" and its login account?`
     );
@@ -685,6 +700,21 @@ export function AdminApp({ data, actions, busyAction }) {
 
   const handleDeleteKarigar = async () => {
     if (!karigarEditForm.karigar_id) return;
+
+    // Validation: prevent deletion if karigar has pending pieces
+    const pendingPieces = (data.pieces || []).filter(
+      (p) =>
+        p.assigned_karigar_id === karigarEditForm.karigar_id &&
+        p.karigar_status !== "complete"
+    );
+
+    if (pendingPieces.length > 0) {
+      window.alert(
+        `Cannot delete karigar "${karigarEditForm.name}" because they have ${pendingPieces.length} pending pieces assigned. Please complete or unassign them first.`
+      );
+      return;
+    }
+
     const confirmed = window.confirm(
       `Delete karigar "${karigarEditForm.name}" and its login account?`
     );
