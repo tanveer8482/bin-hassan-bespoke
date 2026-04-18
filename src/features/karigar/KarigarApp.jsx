@@ -18,20 +18,33 @@ export function KarigarApp({ user, data, onCompletePiece, busyAction }) {
   const [filter, setFilter] = useState("pending");
   const [uploadError, setUploadError] = useState("");
 
-  const shopsById = useMemo(() => byId(data.shops, "shop_id"), [data.shops]);
-  const ordersById = useMemo(() => byId(data.orders, "order_id"), [data.orders]);
+  const shops = Array.isArray(data?.shops) ? data.shops : [];
+  const orders = Array.isArray(data?.orders) ? data.orders : [];
+  const paymentsKarigar = Array.isArray(data?.paymentsKarigar) ? data.paymentsKarigar : [];
+  const visiblePieces = Array.isArray(data?.pieces)
+    ? data.pieces.filter((piece) => piece.assigned_karigar_id === user.entity_id)
+    : [];
+
+  const shopsById = useMemo(() => byId(shops, "shop_id"), [shops]);
+  const ordersById = useMemo(() => byId(orders, "order_id"), [orders]);
 
   const pieces = useMemo(() => {
-    const sorted = [...data.pieces].sort((a, b) => {
+    const sorted = [...visiblePieces].sort((a, b) => {
       return new Date(b.created_date || 0) - new Date(a.created_date || 0);
     });
 
     if (filter === "all") return sorted;
     if (filter === "complete") {
-      return sorted.filter((piece) => piece.karigar_status === "complete" || piece.karigar_status === "pending_approval");
+      return sorted.filter(
+        (piece) =>
+          piece.karigar_status === "complete" || piece.karigar_status === "pending_approval"
+      );
     }
-    return sorted.filter((piece) => piece.karigar_status !== "complete" && piece.karigar_status !== "pending_approval");
-  }, [data.pieces, filter]);
+    return sorted.filter(
+      (piece) =>
+        piece.karigar_status !== "complete" && piece.karigar_status !== "pending_approval"
+    );
+  }, [visiblePieces, filter]);
 
   const paymentSummary = data.computed?.karigarFinancials?.[user.entity_id] || {
     earned: 0,
@@ -221,7 +234,7 @@ export function KarigarApp({ user, data, onCompletePiece, busyAction }) {
                 </tr>
               </thead>
               <tbody>
-                {[...data.paymentsKarigar]
+                {[...paymentsKarigar]
                   .sort((a, b) => new Date(b.payment_date || 0) - new Date(a.payment_date || 0))
                   .map((payment) => (
                     <tr key={payment.payment_id}>
@@ -230,7 +243,7 @@ export function KarigarApp({ user, data, onCompletePiece, busyAction }) {
                       <td>{payment.note || "-"}</td>
                     </tr>
                   ))}
-                {!data.paymentsKarigar.length ? (
+                {!paymentsKarigar.length ? (
                   <tr>
                     <td colSpan={3} className="muted">
                       No payment records yet.

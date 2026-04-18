@@ -318,6 +318,10 @@ function onlyKeys(obj, keySet) {
   );
 }
 
+function asArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
 function filterComputedForRole(computed, orders, pieces, allowedShopIds, allowedKarigarIds) {
   const orderIds = new Set(orders.map((order) => order.order_id));
 
@@ -330,21 +334,58 @@ function filterComputedForRole(computed, orders, pieces, allowedShopIds, allowed
 }
 
 function filterSnapshotByRole(user, snapshot) {
+  const users = asArray(snapshot.users);
+  const shops = asArray(snapshot.shops);
+  const karigars = asArray(snapshot.karigars);
+  const ordersAll = asArray(snapshot.orders);
+  const orderItemsAll = asArray(snapshot.orderItems);
+  const piecesAll = asArray(snapshot.pieces);
+  const paymentsShopsAll = asArray(snapshot.paymentsShops);
+  const paymentsKarigarAll = asArray(snapshot.paymentsKarigar);
+  const settings = asArray(snapshot.settings);
+  const products = asArray(snapshot.products);
+  const productSubProducts = asArray(snapshot.productSubProducts);
+  const shopInvoicesAll = asArray(snapshot.shopInvoices);
+  const shopInvoiceLinesAll = asArray(snapshot.shopInvoiceLines);
+  const payrollSyncRuns = asArray(snapshot.payrollSyncRuns);
+
   if (user.role === ROLES.ADMIN) {
-    return snapshot;
+    return {
+      ...snapshot,
+      users,
+      shops,
+      karigars,
+      orders: ordersAll,
+      orderItems: orderItemsAll,
+      pieces: piecesAll,
+      paymentsShops: paymentsShopsAll,
+      paymentsKarigar: paymentsKarigarAll,
+      settings,
+      products,
+      productSubProducts,
+      shopInvoices: shopInvoicesAll,
+      shopInvoiceLines: shopInvoiceLinesAll,
+      payrollSyncRuns
+    };
   }
 
   if (user.role === ROLES.SHOP) {
     const shopId = user.entity_id;
 
-    const orders = snapshot.orders.filter((order) => order.shop_id === shopId && !parseBoolean(order.is_archived));
-    const archivedOrders = snapshot.orders.filter((order) => order.shop_id === shopId && parseBoolean(order.is_archived));
-    const allOrderIds = new Set(snapshot.orders.filter(o => o.shop_id === shopId).map(o => o.order_id));
+    const orders = ordersAll.filter(
+      (order) => order.shop_id === shopId && !parseBoolean(order.is_archived)
+    );
+    const archivedOrders = ordersAll.filter(
+      (order) => order.shop_id === shopId && parseBoolean(order.is_archived)
+    );
+    const allOrderIds = new Set(
+      ordersAll.filter((order) => order.shop_id === shopId).map((order) => order.order_id)
+    );
 
-    const orderItems = snapshot.orderItems.filter((item) => allOrderIds.has(item.order_id));
+    const orderItems = orderItemsAll.filter((item) => allOrderIds.has(item.order_id));
     const itemIds = new Set(orderItems.map((item) => item.item_id));
 
-    const pieces = snapshot.pieces.filter(
+    const pieces = piecesAll.filter(
       (piece) => allOrderIds.has(piece.order_id) || itemIds.has(piece.item_id)
     );
 
@@ -353,7 +394,7 @@ function filterSnapshotByRole(user, snapshot) {
         .map((piece) => piece.assigned_karigar_id)
         .filter(Boolean)
     );
-    const shopInvoices = snapshot.shopInvoices.filter(
+    const shopInvoices = shopInvoicesAll.filter(
       (invoice) => invoice.shop_id === shopId
     );
     const invoiceIds = new Set(shopInvoices.map((invoice) => invoice.invoice_id));
@@ -361,8 +402,8 @@ function filterSnapshotByRole(user, snapshot) {
     return {
       ...snapshot,
       users: [],
-      shops: snapshot.shops.filter((shop) => shop.shop_id === shopId),
-      karigars: snapshot.karigars.filter((karigar) =>
+      shops: shops.filter((shop) => shop.shop_id === shopId),
+      karigars: karigars.filter((karigar) =>
         karigarIds.has(karigar.karigar_id)
       ),
       orders,
@@ -370,15 +411,18 @@ function filterSnapshotByRole(user, snapshot) {
       orderItems,
       pieces,
       shopInvoices,
-      shopInvoiceLines: snapshot.shopInvoiceLines.filter((line) =>
+      shopInvoiceLines: shopInvoiceLinesAll.filter((line) =>
         invoiceIds.has(line.invoice_id)
       ),
       payrollSyncRuns: [],
-      paymentsShops: snapshot.paymentsShops.filter(
+      paymentsShops: paymentsShopsAll.filter(
         (payment) => payment.shop_id === shopId
       ),
       paymentsKarigar: [],
-      products: snapshot.products.filter(p => p.shop_name === snapshot.shops.find(s => s.shop_id === shopId)?.shop_name),
+      products: products.filter(
+        (product) => product.shop_name === shops.find((shop) => shop.shop_id === shopId)?.shop_name
+      ),
+      productSubProducts,
       settings: [],
       computed: filterComputedForRole(
         snapshot.computed,
@@ -393,15 +437,15 @@ function filterSnapshotByRole(user, snapshot) {
   if (user.role === ROLES.KARIGAR) {
     const karigarId = user.entity_id;
 
-    const pieces = snapshot.pieces.filter(
+    const pieces = piecesAll.filter(
       (piece) => piece.assigned_karigar_id === karigarId
     );
 
     const orderIds = new Set(pieces.map((piece) => piece.order_id));
     const itemIds = new Set(pieces.map((piece) => piece.item_id));
 
-    const orders = snapshot.orders.filter((order) => orderIds.has(order.order_id));
-    const orderItems = snapshot.orderItems.filter(
+    const orders = ordersAll.filter((order) => orderIds.has(order.order_id));
+    const orderItems = orderItemsAll.filter(
       (item) => itemIds.has(item.item_id) || orderIds.has(item.order_id)
     );
 
@@ -410,8 +454,8 @@ function filterSnapshotByRole(user, snapshot) {
     return {
       ...snapshot,
       users: [],
-      shops: snapshot.shops.filter((shop) => shopIds.has(shop.shop_id)),
-      karigars: snapshot.karigars.filter(
+      shops: shops.filter((shop) => shopIds.has(shop.shop_id)),
+      karigars: karigars.filter(
         (karigar) => karigar.karigar_id === karigarId
       ),
       orders,
@@ -421,13 +465,13 @@ function filterSnapshotByRole(user, snapshot) {
       shopInvoiceLines: [],
       payrollSyncRuns: [],
       paymentsShops: [],
-      paymentsKarigar: snapshot.paymentsKarigar.filter(
+      paymentsKarigar: paymentsKarigarAll.filter(
         (payment) => payment.karigar_id === karigarId
       ),
       shopRates: [],
-      karigarRates: snapshot.karigarRates.filter(
-        (rate) => rate.karigar_id === karigarId
-      ),
+      karigarRates: [],
+      products: [],
+      productSubProducts: [],
       settings: [],
       computed: filterComputedForRole(
         snapshot.computed,
@@ -440,12 +484,12 @@ function filterSnapshotByRole(user, snapshot) {
   }
 
   if (user.role === ROLES.CUTTING) {
-    const pieces = snapshot.pieces.filter((piece) => !parseBoolean(piece.cutting_done));
+    const pieces = piecesAll.filter((piece) => !parseBoolean(piece.cutting_done));
     const orderIds = new Set(pieces.map((piece) => piece.order_id));
     const itemIds = new Set(pieces.map((piece) => piece.item_id));
 
-    const orders = snapshot.orders.filter((order) => orderIds.has(order.order_id));
-    const orderItems = snapshot.orderItems.filter(
+    const orders = ordersAll.filter((order) => orderIds.has(order.order_id));
+    const orderItems = orderItemsAll.filter(
       (item) => itemIds.has(item.item_id) || orderIds.has(item.order_id)
     );
 
@@ -454,7 +498,7 @@ function filterSnapshotByRole(user, snapshot) {
     return {
       ...snapshot,
       users: [],
-      shops: snapshot.shops.filter((shop) => shopIds.has(shop.shop_id)),
+      shops: shops.filter((shop) => shopIds.has(shop.shop_id)),
       karigars: [],
       orders,
       orderItems,
@@ -467,6 +511,8 @@ function filterSnapshotByRole(user, snapshot) {
       settings: [],
       shopRates: [],
       karigarRates: [],
+      products: [],
+      productSubProducts: [],
       computed: filterComputedForRole(
         snapshot.computed,
         orders,
