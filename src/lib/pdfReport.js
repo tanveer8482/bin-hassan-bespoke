@@ -54,7 +54,7 @@ export function generateMasterPayrollPdf(syncedPieces, totalAmount) {
       footStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: "bold" }
     });
     
-    doc.save(`Master_Payroll_Report_${dateStr.replace(/\//g, "-")}.pdf`);
+    doc.save(`Master_Payroll_Report_${(dateStr || "unknown").replace(/\//g, "-")}.pdf`);
     console.log("[PDF] Master Payroll PDF saved successfully");
   } catch (error) {
     console.error("[PDF] Failed to generate Master Payroll PDF:", error);
@@ -128,7 +128,9 @@ export function generateKarigarLedgerPdf(karigar, pieces, payments, summary) {
       body: paymentData,
     });
     
-    doc.save(`Ledger_${karigar.name.replace(/\s+/g, "_")}_${dateStr.replace(/\//g, "-")}.pdf`);
+    const safeKarigarName = (karigar?.name || "Worker").replace(/\s+/g, "_");
+    const safeDate = (dateStr || "unknown").replace(/\//g, "-");
+    doc.save(`Ledger_${safeKarigarName}_${safeDate}.pdf`);
     console.log("[PDF] Karigar Ledger PDF saved successfully");
   } catch (error) {
     console.error("[PDF] Failed to generate Karigar Ledger PDF:", error);
@@ -199,7 +201,9 @@ export function generateShopLedgerPdf(shop, orders, payments, summary) {
       body: paymentData,
     });
     
-    doc.save(`Report_${shop.shop_name.replace(/\s+/g, "_")}_${dateStr.replace(/\//g, "-")}.pdf`);
+    const safeShopName = (shop?.shop_name || "Shop").replace(/\s+/g, "_");
+    const safeDate = (dateStr || "unknown").replace(/\//g, "-");
+    doc.save(`Report_${safeShopName}_${safeDate}.pdf`);
     console.log("[PDF] Shop Ledger PDF saved successfully");
   } catch (error) {
     console.error("[PDF] Failed to generate Shop Ledger PDF:", error);
