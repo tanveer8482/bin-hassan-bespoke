@@ -230,6 +230,9 @@ export function AdminApp({ data, actions, busyAction }) {
 
   const ordersById = useMemo(() => byId(data.orders, "order_id"), [data.orders]);
 
+  const selectSlipPhoto = async (file) => {
+    if (!file) return;
+
     try {
       const dataUrl = await compressImageFile(file, 1024, 300);
       setOrderForm((current) => ({
