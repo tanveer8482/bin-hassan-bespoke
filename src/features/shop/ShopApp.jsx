@@ -189,7 +189,10 @@ export function ShopApp({ user, data }) {
             <h2>Shop Ledger & Reports</h2>
             <button 
               className="button primary"
-              onClick={() => generateShopLedgerPdf(user, orders, data.paymentsShops, financial)}
+              onClick={() => {
+                console.log("[SHOP_REPORT_CLICK]", { user, orderCount: orders.length });
+                generateShopLedgerPdf(user, orders, data.paymentsShops, financial);
+              }}
             >
               Download My Report (PDF)
             </button>

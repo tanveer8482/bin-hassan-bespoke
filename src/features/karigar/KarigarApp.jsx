@@ -267,7 +267,10 @@ export function KarigarApp({ user, data, onCompletePiece, busyAction }) {
             <h2>Financial Ledger</h2>
             <button 
               className="button primary"
-              onClick={() => generateKarigarLedgerPdf(user, visiblePieces, paymentsKarigar, paymentSummary)}
+              onClick={() => {
+                console.log("[KARIGAR_LEDGER_CLICK]", { user, pieceCount: visiblePieces.length });
+                generateKarigarLedgerPdf(user, visiblePieces, paymentsKarigar, paymentSummary);
+              }}
             >
               Download My Ledger (PDF)
             </button>
