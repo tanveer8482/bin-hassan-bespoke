@@ -592,8 +592,9 @@ tbody tr:nth-child(even) {
   position: relative;
   display: flex;
   align-items: center;
-  width: 100%;
-  max-width: 300px;
+  min-width: 250px;
+  flex: 1;
+  min-height: 44px;
 }
 
 .search-input {
@@ -606,6 +607,7 @@ tbody tr:nth-child(even) {
   min-height: 44px;
   font-size: 14px;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  box-sizing: border-box;
 }
 
 .search-input:focus {
