@@ -1,9 +1,11 @@
 import { useMemo, useState } from "react";
 import { byId, formatDate, normalizeBool } from "../../lib/format";
 import { preparePhotoPayloadForApi } from "../../lib/api";
+import { SearchBar } from "../../components/SearchBar";
 
 export function CuttingApp({ data, onUploadCuttingPhoto, busyAction }) {
   const [uploadError, setUploadError] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
 
   const ordersById = useMemo(() => byId(data.orders, "order_id"), [data.orders]);
   const shopsById = useMemo(() => byId(data.shops, "shop_id"), [data.shops]);
@@ -29,6 +31,16 @@ export function CuttingApp({ data, onUploadCuttingPhoto, busyAction }) {
 
     return Array.from(grouped.values());
   }, [data.pieces]);
+
+  const filteredPieces = useMemo(() => {
+    if (!searchQuery.trim()) return pendingPieces;
+    const query = searchQuery.toLowerCase();
+    return pendingPieces.filter((piece) => {
+      const order = ordersById[piece.order_id] || {};
+      const orderNumber = order.order_number?.toString().toLowerCase() || "";
+      return orderNumber.includes(query);
+    });
+  }, [pendingPieces, searchQuery, ordersById]);
 
   const handleFileChange = async (pieceId, file) => {
     if (!file) return;
@@ -71,8 +83,10 @@ export function CuttingApp({ data, onUploadCuttingPhoto, busyAction }) {
 
         {uploadError ? <div className="alert error">{uploadError}</div> : null}
 
+        <SearchBar value={searchQuery} onChange={setSearchQuery} placeholder="Search by order number..." />
+
         <div className="cards-grid">
-          {pendingPieces.map((piece) => {
+          {filteredPieces.map((piece) => {
             const order = ordersById[piece.order_id] || {};
             const shop = shopsById[order.shop_id] || {};
             const displayName = piece.bundle_piece_type || piece.piece_name;
@@ -147,8 +161,12 @@ export function CuttingApp({ data, onUploadCuttingPhoto, busyAction }) {
             );
           })}
 
-          {!pendingPieces.length ? (
-            <p className="muted">No pending cutting pieces right now.</p>
+          {!filteredPieces.length ? (
+            <p className="muted">
+              {searchQuery
+                ? "No cutting pieces found matching your search."
+                : "No pending cutting pieces right now."}
+            </p>
           ) : null}
         </div>
       </section>

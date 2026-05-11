@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { StatusBadge } from "../../components/StatusBadge";
+import { SearchBar } from "../../components/SearchBar";
 import {
   byId,
   formatCurrency,
@@ -17,6 +18,7 @@ function pieceBadge(status) {
 export function KarigarApp({ user, data, onCompletePiece, busyAction }) {
   const [tab, setTab] = useState("work");
   const [filter, setFilter] = useState("pending");
+  const [searchQuery, setSearchQuery] = useState("");
   const [uploadError, setUploadError] = useState("");
 
   const shops = Array.isArray(data?.shops) ? data.shops : [];
@@ -46,6 +48,16 @@ export function KarigarApp({ user, data, onCompletePiece, busyAction }) {
         piece.karigar_status !== "complete" && piece.karigar_status !== "pending_approval"
     );
   }, [visiblePieces, filter]);
+
+  const filteredPieces = useMemo(() => {
+    if (!searchQuery.trim()) return pieces;
+    const query = searchQuery.toLowerCase();
+    return pieces.filter((piece) => {
+      const order = ordersById[piece.order_id];
+      const orderNumber = order?.order_number?.toString().toLowerCase() || "";
+      return orderNumber.includes(query);
+    });
+  }, [pieces, searchQuery, ordersById]);
 
   const paymentSummary = data.computed?.karigarFinancials?.[user.entity_id] || {
     earned: 0,
@@ -111,21 +123,28 @@ export function KarigarApp({ user, data, onCompletePiece, busyAction }) {
         <section className="panel">
           <div className="panel-head">
             <h2>Assigned Pieces</h2>
-            <select
-              className="input"
-              value={filter}
-              onChange={(event) => setFilter(event.target.value)}
-            >
-              <option value="pending">Pending</option>
-              <option value="complete">Completed</option>
-              <option value="all">All</option>
-            </select>
+            <div className="inline-controls">
+              <SearchBar 
+                value={searchQuery} 
+                onChange={setSearchQuery}
+                placeholder="Search by order number..."
+              />
+              <select
+                className="input"
+                value={filter}
+                onChange={(event) => setFilter(event.target.value)}
+              >
+                <option value="pending">Pending</option>
+                <option value="complete">Completed</option>
+                <option value="all">All</option>
+              </select>
+            </div>
           </div>
 
           {uploadError ? <div className="alert error">{uploadError}</div> : null}
 
           <div className="cards-grid">
-            {pieces.map((piece) => {
+            {filteredPieces.map((piece) => {
               const order = ordersById[piece.order_id];
               const shop = shopsById[order?.shop_id] || {};
               const badge = pieceBadge(piece.karigar_status);
@@ -210,7 +229,13 @@ export function KarigarApp({ user, data, onCompletePiece, busyAction }) {
                 </article>
               );
             })}
-            {!pieces.length ? <p className="muted">No pieces found for this filter.</p> : null}
+            {!filteredPieces.length ? (
+              <p className="muted">
+                {searchQuery
+                  ? "No pieces found matching your search."
+                  : "No pieces found for this filter."}
+              </p>
+            ) : null}
           </div>
         </section>
       ) : tab === "payments" ? (

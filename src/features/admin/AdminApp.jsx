@@ -1,6 +1,7 @@
 
 import { useMemo, useState, useCallback } from "react";
 import { StatusBadge } from "../../components/StatusBadge";
+import { SearchBar } from "../../components/SearchBar";
 import {
   byId,
   filterTodayAndOverdue,
@@ -151,7 +152,7 @@ export function AdminApp({ data, actions, busyAction }) {
   const [tab, setTab] = useState("dashboard");
 
   const [orderForm, setOrderForm] = useState(emptyOrderForm());
-  const [orderFilter, setOrderFilter] = useState({ status: "all", shop_id: "all" });
+  const [orderFilter, setOrderFilter] = useState({ status: "all", shop_id: "all", search_query: "" });
 
   const [assignDraft, setAssignDraft] = useState({});
 
@@ -260,10 +261,19 @@ export function AdminApp({ data, actions, busyAction }) {
     debouncedSetOrderFilter((current) => ({ ...current, status: value }));
   }, [debouncedSetOrderFilter]);
 
+  const handleSearchChange = useCallback((value) => {
+    debouncedSetOrderFilter((current) => ({ ...current, search_query: value }));
+  }, [debouncedSetOrderFilter]);
+
   const filteredOrders = useMemo(() => {
     return data.orders.filter((order) => {
       if (orderFilter.status !== "all" && order.status !== orderFilter.status) return false;
       if (orderFilter.shop_id !== "all" && order.shop_id !== orderFilter.shop_id) return false;
+      if (orderFilter.search_query.trim()) {
+        const query = orderFilter.search_query.toLowerCase();
+        const orderNumber = order.order_number?.toString().toLowerCase() || "";
+        if (!orderNumber.includes(query)) return false;
+      }
       return true;
     });
   }, [data.orders, orderFilter]);
@@ -1164,6 +1174,11 @@ export function AdminApp({ data, actions, busyAction }) {
             <div className="panel-head">
               <h3>Orders</h3>
               <div className="inline-controls">
+                <SearchBar 
+                  value={orderFilter.search_query} 
+                  onChange={handleSearchChange}
+                  placeholder="Search by order number..."
+                />
                 <select
                   className="input"
                   value={orderFilter.shop_id}

@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { StatusBadge } from "../../components/StatusBadge";
+import { SearchBar } from "../../components/SearchBar";
 import {
   byId,
   formatCurrency,
@@ -20,12 +21,21 @@ function pieceBadge(status) {
 
 export function ShopApp({ user, data }) {
   const [tab, setTab] = useState("orders");
+  const [searchQuery, setSearchQuery] = useState("");
 
   const orders = useMemo(() => {
     return [...data.orders].sort((a, b) => {
       return new Date(a.delivery_date || 0) - new Date(b.delivery_date || 0);
     });
   }, [data.orders]);
+
+  const filteredOrders = useMemo(() => {
+    if (!searchQuery.trim()) return orders;
+    const query = searchQuery.toLowerCase();
+    return orders.filter((order) =>
+      order.order_number?.toString().toLowerCase().includes(query)
+    );
+  }, [orders, searchQuery]);
 
   const orderItemsByOrder = useMemo(() => {
     return data.orderItems.reduce((map, item) => {
@@ -77,9 +87,10 @@ export function ShopApp({ user, data }) {
       {tab === "orders" ? (
         <section className="panel">
           <h2>Orders</h2>
+          <SearchBar value={searchQuery} onChange={setSearchQuery} />
 
           <div className="cards-grid">
-            {orders.map((order) => {
+            {filteredOrders.map((order) => {
               const pieces = piecesByOrder[order.order_id] || [];
               const items = orderItemsByOrder[order.order_id] || [];
               const completeCount = pieces.filter(
@@ -131,7 +142,11 @@ export function ShopApp({ user, data }) {
                 </article>
               );
             })}
-            {!orders.length ? <p className="muted">No orders found.</p> : null}
+            {!filteredOrders.length ? (
+              <p className="muted">
+                {searchQuery ? "No orders found matching your search." : "No orders found."}
+              </p>
+            ) : null}
           </div>
         </section>
       ) : tab === "payments" ? (
