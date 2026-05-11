@@ -1,7 +1,6 @@
 
 import { useMemo, useState, useCallback } from "react";
 import { StatusBadge } from "../../components/StatusBadge";
-import { SearchBar } from "../../components/SearchBar";
 import {
   byId,
   filterTodayAndOverdue,
@@ -148,11 +147,11 @@ async function compressImageFile(file, maxDimension = 1024, targetKb = 300) {
   return dataUrl;
 }
 
-export function AdminApp({ data, actions, busyAction }) {
+export function AdminApp({ data, actions, busyAction, orderSearchQuery = "" }) {
   const [tab, setTab] = useState("dashboard");
 
   const [orderForm, setOrderForm] = useState(emptyOrderForm());
-  const [orderFilter, setOrderFilter] = useState({ status: "all", shop_id: "all", search_query: "" });
+  const [orderFilter, setOrderFilter] = useState({ status: "all", shop_id: "all" });
 
   const [assignDraft, setAssignDraft] = useState({});
 
@@ -261,22 +260,18 @@ export function AdminApp({ data, actions, busyAction }) {
     debouncedSetOrderFilter((current) => ({ ...current, status: value }));
   }, [debouncedSetOrderFilter]);
 
-  const handleSearchChange = useCallback((value) => {
-    debouncedSetOrderFilter((current) => ({ ...current, search_query: value }));
-  }, [debouncedSetOrderFilter]);
-
   const filteredOrders = useMemo(() => {
     return data.orders.filter((order) => {
       if (orderFilter.status !== "all" && order.status !== orderFilter.status) return false;
       if (orderFilter.shop_id !== "all" && order.shop_id !== orderFilter.shop_id) return false;
-      if (orderFilter.search_query.trim()) {
-        const query = orderFilter.search_query.toLowerCase();
+      if (orderSearchQuery.trim()) {
+        const query = orderSearchQuery.toLowerCase();
         const orderNumber = order.order_number?.toString().toLowerCase() || "";
         if (!orderNumber.includes(query)) return false;
       }
       return true;
     });
-  }, [data.orders, orderFilter]);
+  }, [data.orders, orderFilter, orderSearchQuery]);
 
   const pendingCutPieces = useMemo(() => {
     const rawPending = data.pieces.filter((piece) => !normalizeBool(piece.cutting_done));
@@ -1174,11 +1169,6 @@ export function AdminApp({ data, actions, busyAction }) {
             <div className="panel-head">
               <h3>Orders</h3>
               <div className="inline-controls">
-                <SearchBar 
-                  value={orderFilter.search_query} 
-                  onChange={handleSearchChange}
-                  placeholder="Search by order number..."
-                />
                 <select
                   className="input"
                   value={orderFilter.shop_id}

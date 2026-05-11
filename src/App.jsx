@@ -140,6 +140,7 @@ export default function App() {
 
   const [loading, setLoading] = useState(Boolean(token));
   const [busyAction, setBusyAction] = useState("");
+  const [orderSearchQuery, setOrderSearchQuery] = useState("");
 
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -731,6 +732,8 @@ export default function App() {
         offline={offline}
         pendingCount={pendingMutations.length}
         flushInProgress={syncMeta.flushInProgress}
+        searchQuery={user?.role === "admin" ? orderSearchQuery : undefined}
+        onSearchChange={user?.role === "admin" ? setOrderSearchQuery : undefined}
       />
 
       {error ? <div className="alert error">{error}</div> : null}
@@ -739,7 +742,12 @@ export default function App() {
       {loading || (token && !storageReady) ? <p className="muted">Loading latest data...</p> : null}
 
       {!loading && storageReady && user?.role === "admin" ? (
-        <AdminApp data={{ ...data, settings }} actions={actions} busyAction={busyAction} />
+        <AdminApp
+          data={{ ...data, settings }}
+          actions={actions}
+          busyAction={busyAction}
+          orderSearchQuery={orderSearchQuery}
+        />
       ) : null}
 
       {!loading && storageReady && user?.role === "karigar" ? (
