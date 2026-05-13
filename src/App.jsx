@@ -10,6 +10,7 @@ import {
   setPersistedValue
 } from "./lib/appPersistence";
 import { emptySnapshot } from "./lib/emptySnapshot";
+import { formatDateTime } from "./lib/format";
 import { SyncBar } from "./components/SyncBar";
 import { AdminApp, TAB_LIST as ADMIN_TAB_LIST } from "./features/admin/AdminApp";
 import { KarigarApp } from "./features/karigar/KarigarApp";
@@ -712,20 +713,18 @@ export default function App() {
   return (
     <div className="app-shell">
       <header className="topbar">
-        <div>
-          <p className="eyebrow">Bin Hassan Bespoke</p>
-          <h1>{user?.role === "admin" ? "Admin Panel" : user?.display_name || "User"}</h1>
-          <p className="muted role-note">Role: {user?.role || "-"}</p>
-        </div>
-        <div className="topbar-actions">
+        <div className="topbar-brand">
           <button
             type="button"
-            className="button ghost profile-trigger"
+            className="button ghost nav-trigger"
             onClick={() => setMobileNavOpen(true)}
-            aria-label="Open admin navigation"
+            aria-label="Open navigation menu"
           >
-            BH
+            ☰
           </button>
+          <h1 className="brand-title">Bin Hassan Bespoke</h1>
+        </div>
+        <div className="topbar-actions">
           {user?.role !== "karigar" && user?.role !== "shop" && (
             <button className="button ghost" onClick={() => actions.refresh()}>
               Refresh
@@ -743,12 +742,26 @@ export default function App() {
             <div className="drawer-header">
               <div>
                 <p className="eyebrow">Bin Hassan Bespoke</p>
-                <h2>Admin Navigation</h2>
+                <h2>Menu</h2>
               </div>
               <button className="drawer-close" type="button" onClick={() => setMobileNavOpen(false)} aria-label="Close navigation menu">
                 ×
               </button>
             </div>
+
+            <div className="drawer-status">
+              <p className="muted">Last synced</p>
+              <strong>{formatDateTime(lastSynced)}</strong>
+              <div className="drawer-status-pills">
+                {pendingMutations.length ? (
+                  <span className="offline-pill">
+                    {syncMeta.flushInProgress ? "Syncing queue..." : `${pendingMutations.length} pending changes`}
+                  </span>
+                ) : null}
+                {offline ? <span className="offline-pill">Offline mode</span> : null}
+              </div>
+            </div>
+
             <nav className="drawer-nav">
               {ADMIN_TAB_LIST.map((entry) => (
                 <button
@@ -793,6 +806,7 @@ export default function App() {
       ) : null}
 
       <SyncBar
+        showInfo={false}
         lastSynced={lastSynced}
         offline={offline}
         pendingCount={pendingMutations.length}

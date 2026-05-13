@@ -261,6 +261,23 @@ export function AdminApp({ data, actions, busyAction, orderSearchQuery = "", sel
 
   const dueSummary = useMemo(() => filterTodayAndOverdue(data.orders), [data.orders]);
 
+  const dashboardFilterLabel = useMemo(() => {
+    switch (dashboardFilter) {
+      case "active":
+        return "Active Orders";
+      case "dueToday":
+        return "Due Today";
+      case "overdue":
+        return "Overdue";
+      case "pendingCutting":
+        return "Pending Cutting";
+      case "ready":
+        return "Ready for Delivery";
+      default:
+        return "All Orders";
+    }
+  }, [dashboardFilter]);
+
   const handleShopFilterChange = useCallback((value) => {
     debouncedSetOrderFilter((current) => ({ ...current, shop_id: value }));
   }, [debouncedSetOrderFilter]);
@@ -830,6 +847,56 @@ export function AdminApp({ data, actions, busyAction, orderSearchQuery = "", sel
               <h3>{dashboard.orders_ready_for_delivery}</h3>
             </button>
           </div>
+
+          {dashboardFilter !== "all" ? (
+            <div className="panel inset" style={{ margin: "1rem 0" }}>
+              <div className="panel-head">
+                <h3>{dashboardFilterLabel}</h3>
+                <button
+                  type="button"
+                  className="button ghost small"
+                  onClick={() => setDashboardFilter("all")}
+                >
+                  Clear filter
+                </button>
+              </div>
+              {filteredOrders.length ? (
+                <div className="cards-grid">
+                  {filteredOrders.map((order) => {
+                    const orderPieces = piecesByOrder[order.order_id] || [];
+                    const orderItems = orderItemsByOrder[order.order_id] || [];
+                    const completeCount = orderPieces.filter(
+                      (piece) => piece.karigar_status === "complete"
+                    ).length;
+                    const total = data.computed?.orderTotals?.[order.order_id]?.grand_total || 0;
+                    const badge = orderBadge(order.status);
+
+                    return (
+                      <article className="card" key={order.order_id}>
+                        <div className="card-head compact">
+                          <div>
+                            <p className="muted">Order #</p>
+                            <h3>{order.order_number}</h3>
+                            <p className="muted">
+                              {shopsById[order.shop_id]?.shop_name || order.shop_id}
+                            </p>
+                          </div>
+                          <StatusBadge label={badge.label} tone={badge.tone} />
+                        </div>
+                        <p>Delivery: {formatDate(order.delivery_date)}</p>
+                        <p>Total: {formatCurrency(total)}</p>
+                        <p className="muted">
+                          Items: {orderItems.length} | Completed pieces: {completeCount}/{orderPieces.length}
+                        </p>
+                      </article>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="muted">No orders match this filter.</p>
+              )}
+            </div>
+          ) : null}
 
           <div className="panel inset warning-box" style={{ margin: '1rem 0' }}>
              <div className="panel-head">

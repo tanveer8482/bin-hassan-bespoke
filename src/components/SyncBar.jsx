@@ -7,21 +7,25 @@ export function SyncBar({
   pendingCount = 0,
   flushInProgress = false,
   searchQuery,
-  onSearchChange
+  onSearchChange,
+  showInfo = true
 }) {
   return (
     <div className="sync-bar" role="status" aria-live="polite">
-      <div className="sync-info">
-        <span>
-          Last synced: <strong>{formatDateTime(lastSynced)}</strong>
-        </span>
-        {pendingCount ? (
-          <span className="offline-pill">
-            {flushInProgress ? "Syncing queue..." : `${pendingCount} pending changes`}
+      {showInfo ? (
+        <div className="sync-info">
+          <span>
+            Last synced: <strong>{formatDateTime(lastSynced)}</strong>
           </span>
-        ) : null}
-        {offline ? <span className="offline-pill">Offline mode</span> : null}
-      </div>
+          {pendingCount ? (
+            <span className="offline-pill">
+              {flushInProgress ? "Syncing queue..." : `${pendingCount} pending changes`}
+            </span>
+          ) : null}
+          {offline ? <span className="offline-pill">Offline mode</span> : null}
+        </div>
+      ) : null}
+
       {typeof onSearchChange === "function" ? (
         <div className="sync-search">
           <SearchBar value={searchQuery} onChange={onSearchChange} placeholder="Search orders..." />
