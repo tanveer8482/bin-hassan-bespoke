@@ -716,7 +716,7 @@ export default function App() {
         <div className="topbar-brand">
           <button
             type="button"
-            className="button ghost nav-trigger"
+            className="button nav-trigger"
             onClick={() => setMobileNavOpen(true)}
             aria-label="Open navigation menu"
           >
