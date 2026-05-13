@@ -71,6 +71,121 @@ function pieceBadge(status) {
   return PIECE_STATUS_META[status] || { label: status, tone: "pending" };
 }
 
+function OrderListCard({
+  order,
+  shopName,
+  total,
+  orderItems,
+  orderPieces,
+  completeCount,
+  isExpanded,
+  busyAction,
+  onToggle,
+  onStatusChange,
+  onAssignWork
+}) {
+  const badge = orderBadge(order.status);
+  const statusBusy =
+    busyAction === "updateOrder" || busyAction === `deliver:${order.order_id}`;
+
+  return (
+    <article className={`order-row-card ${isExpanded ? "expanded" : ""}`}>
+      <button
+        type="button"
+        className="order-summary-row"
+        onClick={onToggle}
+        aria-expanded={isExpanded}
+      >
+        <span className="order-summary-main">
+          <strong className="order-number">{order.order_number}</strong>
+          <span className="order-shop">{shopName}</span>
+        </span>
+        <StatusBadge label={badge.label} tone={badge.tone} />
+      </button>
+
+      {isExpanded ? (
+        <div className="order-expanded-body">
+          <div className="order-details-grid">
+            <div className="order-detail-cell">
+              <span>Delivery</span>
+              <strong>{formatDate(order.delivery_date)}</strong>
+            </div>
+            <div className="order-detail-cell">
+              <span>Bill</span>
+              <strong>{formatCurrency(total)}</strong>
+            </div>
+            <div className="order-detail-cell">
+              <span>Items</span>
+              <strong>{orderItems.length}</strong>
+            </div>
+            <div className="order-detail-cell">
+              <span>Completed</span>
+              <strong>
+                {completeCount}/{orderPieces.length}
+              </strong>
+            </div>
+          </div>
+
+          <div className="progress-track">
+            <span
+              style={{
+                width: `${orderPieces.length ? (completeCount / orderPieces.length) * 100 : 0}%`
+              }}
+            />
+          </div>
+
+          <div className="order-piece-list">
+            {orderPieces.length ? (
+              orderPieces.map((piece) => {
+                const pBadge = pieceBadge(piece.karigar_status);
+                return (
+                  <div className="inline-list-row" key={piece.piece_id}>
+                    <span>
+                      {piece.piece_name} - {piece.item_type}
+                    </span>
+                    <StatusBadge label={pBadge.label} tone={pBadge.tone} />
+                  </div>
+                );
+              })
+            ) : orderItems.length ? (
+              orderItems.map((item, index) => (
+                <div className="inline-list-row" key={`${order.order_id}-item-${index}`}>
+                  <span>{item.piece_type || item.product_id || `Item ${index + 1}`}</span>
+                  <span className="muted">{item.item_type || "-"}</span>
+                </div>
+              ))
+            ) : (
+              <p className="muted">No item details available.</p>
+            )}
+          </div>
+
+          <div className="order-expanded-actions">
+            <label>
+              Status
+              <select
+                className="input"
+                value={order.status || "pending"}
+                onChange={(event) => onStatusChange(event.target.value)}
+                disabled={statusBusy}
+              >
+                {Object.entries(ORDER_STATUS_META).map(([status, meta]) => (
+                  <option key={status} value={status}>
+                    {meta.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <button type="button" className="button ghost" onClick={onAssignWork}>
+              Assign Work
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </article>
+  );
+}
+
 function readFileAsDataUrl(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -147,7 +262,15 @@ async function compressImageFile(file, maxDimension = 1024, targetKb = 300) {
   return dataUrl;
 }
 
-export function AdminApp({ data, actions, busyAction, orderSearchQuery = "", selectedTab, onTabChange }) {
+export function AdminApp({
+  data,
+  actions,
+  busyAction,
+  orderSearchQuery = "",
+  onOrderSearchChange,
+  selectedTab,
+  onTabChange
+}) {
   const [internalTab, setInternalTab] = useState("dashboard");
   const tab = selectedTab ?? internalTab;
   const setTab = onTabChange ?? setInternalTab;
@@ -155,6 +278,7 @@ export function AdminApp({ data, actions, busyAction, orderSearchQuery = "", sel
   const [orderForm, setOrderForm] = useState(emptyOrderForm());
   const [orderFilter, setOrderFilter] = useState({ status: "all", shop_id: "all" });
   const [dashboardFilter, setDashboardFilter] = useState("all");
+  const [expandedOrderId, setExpandedOrderId] = useState("");
 
   const [assignDraft, setAssignDraft] = useState({});
 
@@ -233,6 +357,23 @@ export function AdminApp({ data, actions, busyAction, orderSearchQuery = "", sel
   }, [data.users]);
 
   const ordersById = useMemo(() => byId(data.orders, "order_id"), [data.orders]);
+  const normalizedOrderSearchQuery = orderSearchQuery.trim().toLowerCase();
+
+  const orderMatchesGlobalSearch = useCallback(
+    (order) => {
+      if (!normalizedOrderSearchQuery) return true;
+      if (!order) return false;
+
+      const orderNumber = order.order_number?.toString().toLowerCase() || "";
+      const shopId = order.shop_id?.toString().toLowerCase() || "";
+      const shopName = shopsById[order.shop_id]?.shop_name?.toLowerCase() || "";
+
+      return [orderNumber, shopId, shopName].some((value) =>
+        value.includes(normalizedOrderSearchQuery)
+      );
+    },
+    [normalizedOrderSearchQuery, shopsById]
+  );
 
   const orderItemsByOrder = useMemo(() => {
     return data.orderItems.reduce((map, item) => {
@@ -300,11 +441,7 @@ export function AdminApp({ data, actions, busyAction, orderSearchQuery = "", sel
     return data.orders.filter((order) => {
       if (orderFilter.status !== "all" && order.status !== orderFilter.status) return false;
       if (orderFilter.shop_id !== "all" && order.shop_id !== orderFilter.shop_id) return false;
-      if (orderSearchQuery.trim()) {
-        const query = orderSearchQuery.toLowerCase();
-        const orderNumber = order.order_number?.toString().toLowerCase() || "";
-        if (!orderNumber.includes(query)) return false;
-      }
+      if (!orderMatchesGlobalSearch(order)) return false;
 
       if (dashboardFilter === "active" && order.status === "delivered") return false;
       if (dashboardFilter === "dueToday" && !dueTodayIds.has(order.order_id)) return false;
@@ -324,7 +461,7 @@ export function AdminApp({ data, actions, busyAction, orderSearchQuery = "", sel
 
       return true;
     });
-  }, [data.orders, orderFilter, orderSearchQuery, dashboardFilter, dueSummary, piecesByOrder]);
+  }, [data.orders, orderFilter, orderMatchesGlobalSearch, dashboardFilter, dueSummary, piecesByOrder]);
 
   const pendingCutPieces = useMemo(() => {
     const rawPending = data.pieces.filter((piece) => !normalizeBool(piece.cutting_done));
@@ -350,6 +487,12 @@ export function AdminApp({ data, actions, busyAction, orderSearchQuery = "", sel
         normalizeBool(piece.cutting_done) && piece.karigar_status === "not_assigned"
     );
   }, [data.pieces]);
+
+  const filteredAssignablePieces = useMemo(() => {
+    return assignablePieces.filter((piece) =>
+      orderMatchesGlobalSearch(ordersById[piece.order_id])
+    );
+  }, [assignablePieces, orderMatchesGlobalSearch, ordersById]);
 
   const dashboard = data.computed?.dashboard || {
     total_active_orders: 0,
@@ -554,10 +697,12 @@ export function AdminApp({ data, actions, busyAction, orderSearchQuery = "", sel
       // Ignore local read errors; app-level error toast handles API issues.
     }
   };
-  const markDelivered = async (orderId) => {
+  const updateOrderStatus = async (orderId, status) => {
+    if (!status || ordersById[orderId]?.status === status) return;
+
     await actions.updateOrder({
       order_id: orderId,
-      status: "delivered"
+      status
     });
   };
 
@@ -793,6 +938,53 @@ export function AdminApp({ data, actions, busyAction, orderSearchQuery = "", sel
     }
   };
 
+  const renderOrderList = (orders, emptyText = "No orders found.") => (
+    <div className="order-list">
+      {orders.map((order) => {
+        const orderPieces = piecesByOrder[order.order_id] || [];
+        const orderItems = orderItemsByOrder[order.order_id] || [];
+        const completeCount = orderPieces.filter(
+          (piece) => piece.karigar_status === "complete"
+        ).length;
+        const total = data.computed?.orderTotals?.[order.order_id]?.grand_total || 0;
+        const shopName = shopsById[order.shop_id]?.shop_name || order.shop_id || "-";
+        const isExpanded = expandedOrderId === order.order_id;
+
+        return (
+          <OrderListCard
+            key={order.order_id}
+            order={order}
+            shopName={shopName}
+            total={total}
+            orderItems={orderItems}
+            orderPieces={orderPieces}
+            completeCount={completeCount}
+            isExpanded={isExpanded}
+            busyAction={busyAction}
+            onToggle={() =>
+              setExpandedOrderId((current) =>
+                current === order.order_id ? "" : order.order_id
+              )
+            }
+            onStatusChange={(status) => updateOrderStatus(order.order_id, status)}
+            onAssignWork={() => {
+              if (typeof onOrderSearchChange === "function") {
+                onOrderSearchChange(order.order_number?.toString() || "");
+              }
+              setTab("assign");
+            }}
+          />
+        );
+      })}
+
+      {!orders.length ? (
+        <div className="empty-list-state">
+          <p className="muted">{emptyText}</p>
+        </div>
+      ) : null}
+    </div>
+  );
+
   return (
     <div className="role-shell">
       <div className="tab-row main-tab-row wrap">
@@ -880,40 +1072,11 @@ export function AdminApp({ data, actions, busyAction, orderSearchQuery = "", sel
                   Clear filter
                 </button>
               </div>
-              {filteredOrders.length ? (
-                <div className="cards-grid">
-                  {filteredOrders.map((order) => {
-                    const orderPieces = piecesByOrder[order.order_id] || [];
-                    const orderItems = orderItemsByOrder[order.order_id] || [];
-                    const completeCount = orderPieces.filter(
-                      (piece) => piece.karigar_status === "complete"
-                    ).length;
-                    const total = data.computed?.orderTotals?.[order.order_id]?.grand_total || 0;
-                    const badge = orderBadge(order.status);
-
-                    return (
-                      <article className="card" key={order.order_id}>
-                        <div className="card-head compact">
-                          <div>
-                            <p className="muted">Order #</p>
-                            <h3>{order.order_number}</h3>
-                            <p className="muted">
-                              {shopsById[order.shop_id]?.shop_name || order.shop_id}
-                            </p>
-                          </div>
-                          <StatusBadge label={badge.label} tone={badge.tone} />
-                        </div>
-                        <p>Delivery: {formatDate(order.delivery_date)}</p>
-                        <p>Total: {formatCurrency(total)}</p>
-                        <p className="muted">
-                          Items: {orderItems.length} | Completed pieces: {completeCount}/{orderPieces.length}
-                        </p>
-                      </article>
-                    );
-                  })}
-                </div>
-              ) : (
-                <p className="muted">No orders match this filter.</p>
+              {renderOrderList(
+                filteredOrders,
+                dashboardFilter === "pendingCutting"
+                  ? "No pending tasks."
+                  : `No ${dashboardFilterLabel.toLowerCase()} orders found.`
               )}
             </div>
           ) : (
@@ -1270,76 +1433,12 @@ export function AdminApp({ data, actions, busyAction, orderSearchQuery = "", sel
               </div>
             </div>
 
-            <div className="cards-grid">
-              {filteredOrders.map((order) => {
-                const orderPieces = piecesByOrder[order.order_id] || [];
-                const orderItems = orderItemsByOrder[order.order_id] || [];
-                const completeCount = orderPieces.filter(
-                  (piece) => piece.karigar_status === "complete"
-                ).length;
-                const total = data.computed?.orderTotals?.[order.order_id]?.grand_total || 0;
-                const badge = orderBadge(order.status);
-
-                return (
-                  <article className="card" key={order.order_id}>
-                    <div className="card-head compact">
-                      <div>
-                        <p className="muted">Order #</p>
-                        <h3>{order.order_number}</h3>
-                        <p className="muted">
-                          {shopsById[order.shop_id]?.shop_name || order.shop_id}
-                        </p>
-                      </div>
-                      <StatusBadge label={badge.label} tone={badge.tone} />
-                    </div>
-
-                    <p>Delivery: {formatDate(order.delivery_date)}</p>
-                    <p>Total Bill: {formatCurrency(total)}</p>
-                    <p className="muted">
-                      Items: {orderItems.length} | Completed pieces: {completeCount}/
-                      {orderPieces.length}
-                    </p>
-
-                    <div className="progress-track">
-                      <span
-                        style={{
-                          width: `${
-                            orderPieces.length
-                              ? (completeCount / orderPieces.length) * 100
-                              : 0
-                          }%`
-                        }}
-                      />
-                    </div>
-
-                    {orderPieces.map((piece) => {
-                      const pBadge = pieceBadge(piece.karigar_status);
-                      return (
-                        <div className="inline-list-row" key={piece.piece_id}>
-                          <span>
-                            {piece.piece_name} - {piece.item_type}
-                          </span>
-                          <StatusBadge label={pBadge.label} tone={pBadge.tone} />
-                        </div>
-                      );
-                    })}
-
-                    {order.status === "ready" ? (
-                      <button
-                        className="button"
-                        onClick={() => markDelivered(order.order_id)}
-                        disabled={busyAction === `deliver:${order.order_id}`}
-                      >
-                        {busyAction === `deliver:${order.order_id}`
-                          ? "Saving..."
-                          : "Mark Delivered"}
-                      </button>
-                    ) : null}
-                  </article>
-                );
-              })}
-              {!filteredOrders.length ? <p className="muted">No orders found.</p> : null}
-            </div>
+            {renderOrderList(
+              filteredOrders,
+              orderSearchQuery.trim()
+                ? "No orders found matching your search."
+                : "No orders found."
+            )}
           </div>
         </section>
       ) : null}
@@ -1415,7 +1514,7 @@ export function AdminApp({ data, actions, busyAction, orderSearchQuery = "", sel
           <h2>Assign Work</h2>
 
           <div className="cards-grid">
-            {assignablePieces.map((piece) => {
+            {filteredAssignablePieces.map((piece) => {
               const draft = assignDraft[piece.piece_id] || {
                 karigar_id: "",
                 designing_karigar_charge: "0"
@@ -1485,8 +1584,12 @@ export function AdminApp({ data, actions, busyAction, orderSearchQuery = "", sel
                 </article>
               );
             })}
-            {!assignablePieces.length ? (
-              <p className="muted">No pieces are ready for assignment.</p>
+            {!filteredAssignablePieces.length ? (
+              <p className="muted">
+                {orderSearchQuery.trim()
+                  ? "No assignable work found matching your search."
+                  : "No pieces are ready for assignment."}
+              </p>
             ) : null}
           </div>
         </section>

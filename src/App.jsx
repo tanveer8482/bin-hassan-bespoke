@@ -843,6 +843,7 @@ export default function App() {
           actions={actions}
           busyAction={busyAction}
           orderSearchQuery={orderSearchQuery}
+          onOrderSearchChange={setOrderSearchQuery}
           selectedTab={adminTab}
           onTabChange={setAdminTab}
         />
