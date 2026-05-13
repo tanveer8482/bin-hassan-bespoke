@@ -767,7 +767,7 @@ export function AdminApp({ data, actions, busyAction, orderSearchQuery = "", sel
 
   return (
     <div className="role-shell">
-      <div className="tab-row wrap">
+      <div className="tab-row main-tab-row wrap">
         {TAB_LIST.map((entry) => (
           <button
             key={entry.key}
