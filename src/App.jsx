@@ -11,7 +11,7 @@ import {
 } from "./lib/appPersistence";
 import { emptySnapshot } from "./lib/emptySnapshot";
 import { SyncBar } from "./components/SyncBar";
-import { AdminApp } from "./features/admin/AdminApp";
+import { AdminApp, TAB_LIST as ADMIN_TAB_LIST } from "./features/admin/AdminApp";
 import { KarigarApp } from "./features/karigar/KarigarApp";
 import { ShopApp } from "./features/shop/ShopApp";
 import { CuttingApp } from "./features/cutting/CuttingApp";
@@ -141,6 +141,8 @@ export default function App() {
   const [loading, setLoading] = useState(Boolean(token));
   const [busyAction, setBusyAction] = useState("");
   const [orderSearchQuery, setOrderSearchQuery] = useState("");
+  const [adminTab, setAdminTab] = useState("dashboard");
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -716,6 +718,14 @@ export default function App() {
           <p className="muted role-note">Role: {user?.role || "-"}</p>
         </div>
         <div className="topbar-actions">
+          <button
+            type="button"
+            className="button ghost profile-trigger"
+            onClick={() => setMobileNavOpen(true)}
+            aria-label="Open admin navigation"
+          >
+            BH
+          </button>
           {user?.role !== "karigar" && user?.role !== "shop" && (
             <button className="button ghost" onClick={() => actions.refresh()}>
               Refresh
@@ -726,6 +736,61 @@ export default function App() {
           </button>
         </div>
       </header>
+      {user?.role === "admin" ? (
+        <div className={`mobile-drawer ${mobileNavOpen ? "open" : ""}`} aria-hidden={!mobileNavOpen}>
+          <button className="drawer-backdrop" type="button" onClick={() => setMobileNavOpen(false)} />
+          <div className="drawer-panel" role="dialog" aria-modal="true" aria-label="Admin navigation menu">
+            <div className="drawer-header">
+              <div>
+                <p className="eyebrow">Bin Hassan Bespoke</p>
+                <h2>Admin Navigation</h2>
+              </div>
+              <button className="drawer-close" type="button" onClick={() => setMobileNavOpen(false)} aria-label="Close navigation menu">
+                ×
+              </button>
+            </div>
+            <nav className="drawer-nav">
+              {ADMIN_TAB_LIST.map((entry) => (
+                <button
+                  key={entry.key}
+                  type="button"
+                  className={entry.key === adminTab ? "tab-button active" : "tab-button"}
+                  onClick={() => {
+                    setAdminTab(entry.key);
+                    setMobileNavOpen(false);
+                  }}
+                >
+                  {entry.label}
+                </button>
+              ))}
+            </nav>
+            <div className="drawer-action-group">
+              {user?.role !== "karigar" && user?.role !== "shop" && (
+                <button
+                  type="button"
+                  className="button ghost"
+                  onClick={() => {
+                    actions.refresh();
+                    setMobileNavOpen(false);
+                  }}
+                >
+                  Refresh
+                </button>
+              )}
+              <button
+                type="button"
+                className="button ghost"
+                onClick={() => {
+                  logout();
+                  setMobileNavOpen(false);
+                }}
+              >
+                Logout
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <SyncBar
         lastSynced={lastSynced}
@@ -747,6 +812,8 @@ export default function App() {
           actions={actions}
           busyAction={busyAction}
           orderSearchQuery={orderSearchQuery}
+          selectedTab={adminTab}
+          onTabChange={setAdminTab}
         />
       ) : null}
 

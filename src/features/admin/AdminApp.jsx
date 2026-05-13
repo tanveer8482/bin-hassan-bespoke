@@ -18,7 +18,7 @@ import { generateMasterPayrollPdf } from "../../lib/pdfReport";
 const PIECE_TYPES = ["coat", "pent", "waistcoat", "suit_2piece", "suit_3piece"];
 const ITEM_TYPES = ["normal", "vip", "chapma"];
 
-const TAB_LIST = [
+export const TAB_LIST = [
   { key: "dashboard", label: "Dashboard" },
   { key: "orders", label: "Orders" },
   { key: "settings", label: "Settings" },
@@ -147,11 +147,14 @@ async function compressImageFile(file, maxDimension = 1024, targetKb = 300) {
   return dataUrl;
 }
 
-export function AdminApp({ data, actions, busyAction, orderSearchQuery = "" }) {
-  const [tab, setTab] = useState("dashboard");
+export function AdminApp({ data, actions, busyAction, orderSearchQuery = "", selectedTab, onTabChange }) {
+  const [internalTab, setInternalTab] = useState("dashboard");
+  const tab = selectedTab ?? internalTab;
+  const setTab = onTabChange ?? setInternalTab;
 
   const [orderForm, setOrderForm] = useState(emptyOrderForm());
   const [orderFilter, setOrderFilter] = useState({ status: "all", shop_id: "all" });
+  const [dashboardFilter, setDashboardFilter] = useState("all");
 
   const [assignDraft, setAssignDraft] = useState({});
 
@@ -252,6 +255,12 @@ export function AdminApp({ data, actions, busyAction, orderSearchQuery = "" }) {
     []
   );
 
+  const handleDashboardFilterClick = useCallback((category) => {
+    setDashboardFilter((current) => (current === category ? "all" : category));
+  }, []);
+
+  const dueSummary = useMemo(() => filterTodayAndOverdue(data.orders), [data.orders]);
+
   const handleShopFilterChange = useCallback((value) => {
     debouncedSetOrderFilter((current) => ({ ...current, shop_id: value }));
   }, [debouncedSetOrderFilter]);
@@ -261,6 +270,9 @@ export function AdminApp({ data, actions, busyAction, orderSearchQuery = "" }) {
   }, [debouncedSetOrderFilter]);
 
   const filteredOrders = useMemo(() => {
+    const dueTodayIds = new Set(dueSummary.dueToday.map((order) => order.order_id));
+    const overdueIds = new Set(dueSummary.overdue.map((order) => order.order_id));
+
     return data.orders.filter((order) => {
       if (orderFilter.status !== "all" && order.status !== orderFilter.status) return false;
       if (orderFilter.shop_id !== "all" && order.shop_id !== orderFilter.shop_id) return false;
@@ -269,9 +281,22 @@ export function AdminApp({ data, actions, busyAction, orderSearchQuery = "" }) {
         const orderNumber = order.order_number?.toString().toLowerCase() || "";
         if (!orderNumber.includes(query)) return false;
       }
+
+      if (dashboardFilter === "active" && order.status === "delivered") return false;
+      if (dashboardFilter === "dueToday" && !dueTodayIds.has(order.order_id)) return false;
+      if (dashboardFilter === "overdue" && !overdueIds.has(order.order_id)) return false;
+      if (dashboardFilter === "pendingCutting") {
+        const orderPieces = piecesByOrder[order.order_id] || [];
+        if (!orderPieces.some((piece) => !normalizeBool(piece.cutting_done))) return false;
+      }
+      if (dashboardFilter === "ready") {
+        const orderPieces = piecesByOrder[order.order_id] || [];
+        if (!orderPieces.length || !orderPieces.every((piece) => piece.karigar_status === "complete")) return false;
+      }
+
       return true;
     });
-  }, [data.orders, orderFilter, orderSearchQuery]);
+  }, [data.orders, orderFilter, orderSearchQuery, dashboardFilter, dueSummary, piecesByOrder]);
 
   const pendingCutPieces = useMemo(() => {
     const rawPending = data.pieces.filter((piece) => !normalizeBool(piece.cutting_done));
@@ -306,7 +331,6 @@ export function AdminApp({ data, actions, busyAction, orderSearchQuery = "" }) {
     overdue_orders: 0
   };
 
-  const dueSummary = filterTodayAndOverdue(data.orders);
   const trackSummary = useMemo(() => {
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -760,26 +784,51 @@ export function AdminApp({ data, actions, busyAction, orderSearchQuery = "" }) {
           <h2>Live Dashboard</h2>
 
           <div className="metrics-grid five">
-            <div className="metric-card">
+            <button
+              type="button"
+              className={`metric-card metric-card-action ${dashboardFilter === "active" ? "selected" : ""}`}
+              onClick={() => handleDashboardFilterClick("active")}
+              aria-pressed={dashboardFilter === "active"}
+            >
               <p>Active Orders</p>
               <h3>{dashboard.total_active_orders}</h3>
-            </div>
-            <div className="metric-card">
+            </button>
+            <button
+              type="button"
+              className={`metric-card metric-card-action ${dashboardFilter === "dueToday" ? "selected" : ""}`}
+              onClick={() => handleDashboardFilterClick("dueToday")}
+              aria-pressed={dashboardFilter === "dueToday"}
+            >
               <p>Due Today</p>
               <h3>{dueSummary.dueToday.length}</h3>
-            </div>
-            <div className="metric-card">
+            </button>
+            <button
+              type="button"
+              className={`metric-card metric-card-action ${dashboardFilter === "overdue" ? "selected" : ""}`}
+              onClick={() => handleDashboardFilterClick("overdue")}
+              aria-pressed={dashboardFilter === "overdue"}
+            >
               <p>Overdue</p>
               <h3>{dashboard.overdue_orders}</h3>
-            </div>
-            <div className="metric-card">
+            </button>
+            <button
+              type="button"
+              className={`metric-card metric-card-action ${dashboardFilter === "pendingCutting" ? "selected" : ""}`}
+              onClick={() => handleDashboardFilterClick("pendingCutting")}
+              aria-pressed={dashboardFilter === "pendingCutting"}
+            >
               <p>Pending Cutting</p>
               <h3>{dashboard.pieces_pending_cutting}</h3>
-            </div>
-            <div className="metric-card highlight">
+            </button>
+            <button
+              type="button"
+              className={`metric-card metric-card-action highlight ${dashboardFilter === "ready" ? "selected" : ""}`}
+              onClick={() => handleDashboardFilterClick("ready")}
+              aria-pressed={dashboardFilter === "ready"}
+            >
               <p>Ready for Delivery</p>
               <h3>{dashboard.orders_ready_for_delivery}</h3>
-            </div>
+            </button>
           </div>
 
           <div className="panel inset warning-box" style={{ margin: '1rem 0' }}>
@@ -965,6 +1014,11 @@ export function AdminApp({ data, actions, busyAction, orderSearchQuery = "" }) {
       {tab === "orders" ? (
         <section className="panel">
           <h2>Create Order</h2>
+          {dashboardFilter !== "all" ? (
+            <p className="muted" style={{ marginBottom: "1rem" }}>
+              Active filter: {dashboardFilter === "active" ? "Active Orders" : dashboardFilter === "dueToday" ? "Due Today" : dashboardFilter === "overdue" ? "Overdue" : dashboardFilter === "pendingCutting" ? "Pending Cutting" : dashboardFilter === "ready" ? "Ready for Delivery" : "All Orders"}
+            </p>
+          ) : null}
           <form className="form-grid" onSubmit={submitOrder}>
             <label>
               Order Number
