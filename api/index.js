@@ -216,8 +216,10 @@ function sanitizeSnapshot(snapshot) {
     shops: stripMetaSafe(snapshot.shops),
     karigars: stripMetaSafe(snapshot.karigars),
     orders: stripMetaSafe(snapshot.orders),
+    archivedOrders: stripMetaSafe(snapshot.archivedOrders),
     orderItems: stripMetaSafe(snapshot.orderItems),
     pieces: stripMetaSafe(snapshot.pieces),
+    archivedPieces: stripMetaSafe(snapshot.archivedPieces),
     paymentsShops: stripMetaSafe(snapshot.paymentsShops),
     paymentsKarigar: stripMetaSafe(snapshot.paymentsKarigar),
     settings: stripMetaSafe(snapshot.settings),
@@ -273,16 +275,21 @@ async function handleOrders(req, res) {
       created_date: now,
       updated_date: now
     };
-    const items = body.items.map(i => ({
-      item_id: id("item"),
-      order_id: orderId,
-      product_id: normalizeText(i.product_id || ""),
-      item_type: normalizeText(i.item_type || "normal"),
-      piece_type: normalizeText(i.piece_type || "coat"),
-      status: "pending",
-      item_rate: toNumber(i.item_rate),
-      measurement_photo_url: normalizeText(i.measurement_photo_url || "")
-    }));
+    const products = await getRecords(SHEETS.PRODUCTS);
+    const items = body.items.map((i) => {
+      const product = products.find((p) => p.product_id === i.product_id);
+      const productRate = toNumber(product?.product_price || product?.shop_rate);
+      return {
+        item_id: id("item"),
+        order_id: orderId,
+        product_id: normalizeText(i.product_id || ""),
+        item_type: normalizeText(i.item_type || "normal"),
+        piece_type: normalizeText(product?.product_name || i.piece_type || "coat"),
+        status: "pending",
+        item_rate: toNumber(i.item_rate) || productRate,
+        measurement_photo_url: normalizeText(i.measurement_photo_url || "")
+      };
+    });
     await appendRecordsBatch([{ tabName: SHEETS.ORDERS, records: [orderRecord] }, { tabName: SHEETS.ORDER_ITEMS, records: items }]);
     return sendOk(res, { message: "Order created", order: orderRecord });
   }
@@ -518,7 +525,14 @@ async function syncPayroll(req, res) {
   completedWork.forEach((piece) => {
     updatesByPieceId.set(piece.piece_id, {
       rowNumber: piece.__rowNumber,
-      record: { ...piece, is_synced: "TRUE", sync_id: syncId, updated_date: nowISO() }
+      record: {
+        ...piece,
+        is_synced: "TRUE",
+        payroll_state: STATUS.PAYROLL.SYNCED,
+        sync_id: syncId,
+        synced_date: nowISO(),
+        updated_date: nowISO()
+      }
     });
   });
   cuttingWork.forEach((piece) => {
@@ -529,7 +543,9 @@ async function syncPayroll(req, res) {
       record: {
         ...baseRecord,
         cutting_credit_synced: "TRUE",
+        payroll_state: STATUS.PAYROLL.SYNCED,
         sync_id: syncId,
+        synced_date: nowISO(),
         updated_date: nowISO()
       }
     });
@@ -544,10 +560,24 @@ async function syncPayroll(req, res) {
     karigar_rate: toNumber(piece.cutting_credit_amount),
     designing_karigar_charge: 0
   }));
+  const syncedPieces = [...completedWork, ...cuttingCredits];
+  const totalAmount = syncedPieces.reduce(
+    (sum, piece) => sum + toNumber(piece.karigar_rate) + toNumber(piece.designing_karigar_charge),
+    0
+  );
+  await appendRecord(SHEETS.PAYROLL_SYNC_RUNS, {
+    sync_id: syncId,
+    triggered_by: requireAuth(req).username || "",
+    triggered_date: nowISO(),
+    piece_count: syncedPieces.length,
+    total_amount: totalAmount,
+    status: STATUS.SYNC_RUN.COMPLETED,
+    note: "Synced to payroll and moved to archive"
+  });
   sendOk(res, { 
     message: `${completedWork.length + cuttingWork.length} work credits synced`,
     sync_id: syncId,
-    syncedPieces: [...completedWork, ...cuttingCredits]
+    syncedPieces
   });
 }
 
@@ -578,7 +608,8 @@ async function handleProducts(req, res) {
       product_id: body.product_id || id("prod"),
       product_name: normalizeText(body.product_name),
       shop_name: normalizeText(body.shop_name),
-      shop_rate: toNumber(body.shop_rate),
+      shop_rate: toNumber(body.product_price || body.shop_rate),
+      product_price: toNumber(body.product_price || body.shop_rate),
       cutting_rate: toNumber(body.cutting_rate),
       is_active: "TRUE",
       created_date: nowISO(),

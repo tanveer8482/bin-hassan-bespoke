@@ -24,10 +24,19 @@ export function ShopApp({ user, data }) {
   const [searchQuery, setSearchQuery] = useState("");
 
   const orders = useMemo(() => {
-    return [...data.orders].sort((a, b) => {
+    const archivedOrderIds = new Set((data.archivedPieces || []).map((piece) => piece.order_id));
+    const activeOrderIds = new Set((data.pieces || []).map((piece) => piece.order_id));
+    return [...data.orders].filter((order) => {
+      if (!archivedOrderIds.has(order.order_id)) return true;
+      return activeOrderIds.has(order.order_id);
+    }).sort((a, b) => {
       return new Date(a.delivery_date || 0) - new Date(b.delivery_date || 0);
     });
-  }, [data.orders]);
+  }, [data.archivedPieces, data.orders, data.pieces]);
+  const allOrders = useMemo(
+    () => [...(data.orders || []), ...(data.archivedOrders || [])],
+    [data.orders, data.archivedOrders]
+  );
 
   const filteredOrders = useMemo(() => {
     if (!searchQuery.trim()) return orders;
@@ -36,6 +45,22 @@ export function ShopApp({ user, data }) {
       order.order_number?.toString().toLowerCase().includes(query)
     );
   }, [orders, searchQuery]);
+
+  const archivedPieces = useMemo(
+    () => (Array.isArray(data.archivedPieces) ? data.archivedPieces : []),
+    [data.archivedPieces]
+  );
+
+  const archivedSearchRows = useMemo(() => {
+    if (!searchQuery.trim()) return [];
+    const query = searchQuery.toLowerCase();
+    return archivedPieces.filter((piece) => {
+      const order = allOrders.find((entry) => entry.order_id === piece.order_id) || {};
+      const orderNumber = order.order_number?.toString().toLowerCase() || "";
+      const pieceName = piece.piece_name?.toString().toLowerCase() || "";
+      return orderNumber.includes(query) || pieceName.includes(query);
+    });
+  }, [archivedPieces, allOrders, searchQuery]);
 
   const orderItemsByOrder = useMemo(() => {
     return data.orderItems.reduce((map, item) => {
@@ -75,6 +100,12 @@ export function ShopApp({ user, data }) {
           onClick={() => setTab("payments")}
         >
           My Payments
+        </button>
+        <button
+          className={tab === "archive" ? "tab-button active" : "tab-button"}
+          onClick={() => setTab("archive")}
+        >
+          Payroll History
         </button>
         <button
           className={tab === "ledger" ? "tab-button active" : "tab-button"}
@@ -147,6 +178,53 @@ export function ShopApp({ user, data }) {
                 {searchQuery ? "No orders found matching your search." : "No orders found."}
               </p>
             ) : null}
+            {archivedSearchRows.map((piece) => {
+              const order = allOrders.find((entry) => entry.order_id === piece.order_id) || {};
+              return (
+                <article className="card" key={`archived-${piece.piece_id}`}>
+                  <div className="card-head compact">
+                    <div>
+                      <p className="muted">Order #{order.order_number || "-"}</p>
+                      <h3>{piece.piece_name || piece.sub_product_name || "-"}</h3>
+                    </div>
+                    <StatusBadge label="Paid/Payroll Settled" tone="delivered" />
+                  </div>
+                  <p className="muted">Archived payroll item</p>
+                </article>
+              );
+            })}
+          </div>
+        </section>
+      ) : tab === "archive" ? (
+        <section className="panel">
+          <h2>Payroll History</h2>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Order</th>
+                  <th>Piece</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {archivedPieces.map((piece) => {
+                  const order = allOrders.find((entry) => entry.order_id === piece.order_id) || {};
+                  return (
+                    <tr key={piece.piece_id}>
+                      <td>{order.order_number || piece.order_id || "-"}</td>
+                      <td>{piece.piece_name || piece.sub_product_name || "-"}</td>
+                      <td><StatusBadge label="Paid/Payroll Settled" tone="delivered" /></td>
+                    </tr>
+                  );
+                })}
+                {!archivedPieces.length ? (
+                  <tr>
+                    <td colSpan={3} className="muted">No settled archive items yet.</td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
           </div>
         </section>
       ) : tab === "payments" ? (

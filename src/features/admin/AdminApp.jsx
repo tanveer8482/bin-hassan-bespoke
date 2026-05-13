@@ -12,7 +12,7 @@ import {
   PIECE_STATUS_META
 } from "../../lib/format";
 import { preparePhotoPayloadForApi } from "../../lib/api";
-import { generateMasterPayrollPdf } from "../../lib/pdfReport";
+import { generateMasterLedgerPdf, generateMasterPayrollPdf } from "../../lib/pdfReport";
 
 
 const PIECE_TYPES = ["coat", "pent", "waistcoat", "suit_2piece", "suit_3piece"];
@@ -39,6 +39,7 @@ export const TAB_LIST = [
   { key: "cutting", label: "Cutting" },
   { key: "assign", label: "Assign Work" },
   { key: "payments", label: "Payments" },
+  { key: "archive", label: "Payroll History" },
   { key: "track", label: "Track & Alerts" }
 ];
 
@@ -135,6 +136,14 @@ function isApprovedPiece(piece) {
 
 function isPendingApprovalPiece(piece) {
   return normalizeRoleValue(piece?.karigar_status) === "pending_approval";
+}
+
+function isPayrollSettledPiece(piece) {
+  return normalizeBool(piece?.is_synced);
+}
+
+function isArchivedPiece(piece) {
+  return normalizeBool(piece?.is_synced) || normalizeBool(piece?.cutting_credit_synced);
 }
 
 function pieceMatchesAssignTab(piece, activeTab) {
@@ -434,7 +443,7 @@ export function AdminApp({
   });
 
   const [settingsTab, setSettingsTab] = useState("products");
-  const [productForm, setProductForm] = useState({ product_name: "", shop_name: "", shop_rate: "", cutting_rate: "" });
+  const [productForm, setProductForm] = useState({ product_name: "", shop_name: "", product_price: "", cutting_rate: "" });
   const [subProductForm, setSubProductForm] = useState({ product_id: "", sub_product_name: "", worker_rate: "" });
   const [syncBusy, setSyncBusy] = useState(false);
 
@@ -503,13 +512,52 @@ export function AdminApp({
     }, {});
   }, [data.orderItems]);
 
+  const activePieces = useMemo(
+    () => data.pieces.filter((piece) => !isPayrollSettledPiece(piece)),
+    [data.pieces]
+  );
+  const archivedPieces = useMemo(
+    () => (data.archivedPieces?.length ? data.archivedPieces : data.pieces.filter(isArchivedPiece)),
+    [data.archivedPieces, data.pieces]
+  );
+  const archivedLedgerRows = useMemo(() => {
+    return archivedPieces.flatMap((piece) => {
+      const rows = [];
+      if (normalizeBool(piece.is_synced) && piece.assigned_karigar_id) {
+        rows.push({
+          ...piece,
+          archive_key: `${piece.piece_id}-work`,
+          archive_piece_name: piece.piece_name || piece.sub_product_name || "-",
+          archive_karigar_id: piece.assigned_karigar_id,
+          archive_amount: number(piece.karigar_rate) + number(piece.designing_karigar_charge)
+        });
+      }
+      if (normalizeBool(piece.cutting_credit_synced) && piece.cutting_by) {
+        rows.push({
+          ...piece,
+          archive_key: `${piece.piece_id}-cutting`,
+          archive_piece_name: `Cutting: ${piece.bundle_piece_type || piece.piece_name}`,
+          archive_karigar_id: piece.cutting_by,
+          archive_amount: number(piece.cutting_credit_amount)
+        });
+      }
+      return rows.length ? rows : [{
+        ...piece,
+        archive_key: piece.piece_id,
+        archive_piece_name: piece.piece_name || piece.sub_product_name || "-",
+        archive_karigar_id: piece.assigned_karigar_id || piece.cutting_by || "",
+        archive_amount: number(piece.karigar_rate) + number(piece.designing_karigar_charge)
+      }];
+    });
+  }, [archivedPieces]);
+
   const piecesByOrder = useMemo(() => {
-    return data.pieces.reduce((map, piece) => {
+    return activePieces.reduce((map, piece) => {
       if (!map[piece.order_id]) map[piece.order_id] = [];
       map[piece.order_id].push(piece);
       return map;
     }, {});
-  }, [data.pieces]);
+  }, [activePieces]);
 
   const debouncedSetOrderFilter = useCallback(
     debounce((newFilter) => setOrderFilter(newFilter), 300),
@@ -542,8 +590,8 @@ export function AdminApp({
   }, [dashboardFilter]);
 
   const pendingApprovalCount = useMemo(
-    () => data.pieces.filter(isPendingApprovalPiece).length,
-    [data.pieces]
+    () => activePieces.filter(isPendingApprovalPiece).length,
+    [activePieces]
   );
 
   const handleShopFilterChange = useCallback((value) => {
@@ -559,6 +607,9 @@ export function AdminApp({
     const overdueIds = new Set(dueSummary.overdue.map((order) => order.order_id));
 
     return data.orders.filter((order) => {
+      const orderPieces = piecesByOrder[order.order_id] || [];
+      const hasArchivedPieces = archivedPieces.some((piece) => piece.order_id === order.order_id);
+      if (!normalizedOrderSearchQuery && !orderPieces.length && hasArchivedPieces) return false;
       if (orderFilter.status !== "all" && order.status !== orderFilter.status) return false;
       if (orderFilter.shop_id !== "all" && order.shop_id !== orderFilter.shop_id) return false;
       if (!orderMatchesGlobalSearch(order)) return false;
@@ -567,24 +618,30 @@ export function AdminApp({
       if (dashboardFilter === "dueToday" && !dueTodayIds.has(order.order_id)) return false;
       if (dashboardFilter === "overdue" && !overdueIds.has(order.order_id)) return false;
       if (dashboardFilter === "pendingCutting") {
-        const orderPieces = piecesByOrder[order.order_id] || [];
         if (!orderPieces.some((piece) => !normalizeBool(piece.cutting_done))) return false;
       }
       if (dashboardFilter === "pendingApproval") {
-        const orderPieces = piecesByOrder[order.order_id] || [];
         if (!orderPieces.some(isPendingApprovalPiece)) return false;
       }
       if (dashboardFilter === "ready") {
-        const orderPieces = piecesByOrder[order.order_id] || [];
         if (!orderPieces.length || !orderPieces.every(isApprovedPiece)) return false;
       }
 
       return true;
     });
-  }, [data.orders, orderFilter, orderMatchesGlobalSearch, dashboardFilter, dueSummary, piecesByOrder]);
+  }, [
+    data.orders,
+    orderFilter,
+    orderMatchesGlobalSearch,
+    dashboardFilter,
+    dueSummary,
+    piecesByOrder,
+    archivedPieces,
+    normalizedOrderSearchQuery
+  ]);
 
   const pendingCutPieces = useMemo(() => {
-    const rawPending = data.pieces.filter((piece) => !normalizeBool(piece.cutting_done));
+    const rawPending = activePieces.filter((piece) => !normalizeBool(piece.cutting_done));
     const grouped = new Map();
 
     rawPending.forEach((piece) => {
@@ -599,14 +656,14 @@ export function AdminApp({
     });
 
     return Array.from(grouped.values());
-  }, [data.pieces]);
+  }, [activePieces]);
 
   const assignablePieces = useMemo(() => {
-    return data.pieces.filter(
+    return activePieces.filter(
       (piece) =>
         normalizeBool(piece.cutting_done) && piece.karigar_status === "not_assigned"
     );
-  }, [data.pieces]);
+  }, [activePieces]);
 
   const filteredAssignablePieces = useMemo(() => {
     return assignablePieces.filter(
@@ -645,6 +702,7 @@ export function AdminApp({
 
     data.orders.forEach((order) => {
       const pieces = piecesByOrder[order.order_id] || [];
+      if (!pieces.length && archivedPieces.some((piece) => piece.order_id === order.order_id)) return;
       const pendingPieces = pieces.filter((piece) => !isApprovedPiece(piece));
 
       if (!pendingPieces.length) {
@@ -676,13 +734,13 @@ export function AdminApp({
       dueTomorrow,
       ready
     };
-  }, [data.orders, piecesByOrder]);
+  }, [data.orders, piecesByOrder, archivedPieces]);
 
   const karigarDelayRows = useMemo(() => {
     const now = new Date();
 
     return data.karigars.map((karigar) => {
-      const assignedPieces = data.pieces.filter(
+      const assignedPieces = activePieces.filter(
         (piece) =>
           piece.assigned_karigar_id === karigar.karigar_id &&
           !isApprovedPiece(piece)
@@ -700,7 +758,7 @@ export function AdminApp({
         ? assignedDays.reduce((sum, day) => sum + day, 0) / assignedDays.length
         : 0;
 
-      const completedPieces = data.pieces.filter(
+      const completedPieces = activePieces.filter(
         (piece) =>
           piece.assigned_karigar_id === karigar.karigar_id &&
           isApprovedPiece(piece)
@@ -730,7 +788,7 @@ export function AdminApp({
         completedThisMonth
       };
     });
-  }, [data.karigars, data.pieces]);
+  }, [data.karigars, activePieces]);
 
   const selectedTrackOrderId = trackOrderId || data.orders[0]?.order_id || "";
   const selectedTrackOrder = data.orders.find((order) => order.order_id === selectedTrackOrderId);
@@ -829,10 +887,11 @@ export function AdminApp({
         : 0,
       items: orderForm.items.map((item) => {
         const product = data.products.find((p) => p.product_id === item.product_id);
+        const productPrice = number(product?.product_price || product?.shop_rate || 0);
         return {
           ...item,
           piece_type: product?.product_name || item.piece_type || "",
-          item_rate: item.item_rate === "" ? undefined : number(item.item_rate)
+          item_rate: item.item_rate === "" ? productPrice : number(item.item_rate)
         };
       })
     };
@@ -914,6 +973,15 @@ export function AdminApp({
       }
       // Ignore local read errors; app-level error toast handles API issues.
     }
+  };
+
+  const handleDownloadMasterLedger = () => {
+    generateMasterLedgerPdf({
+      karigars: data.karigars,
+      shops: data.shops,
+      karigarFinancials: data.computed?.karigarFinancials || {},
+      shopFinancials: data.computed?.shopFinancials || {}
+    });
   };
 
   const markCuttingPiece = async (pieceId) => {
@@ -1021,12 +1089,13 @@ export function AdminApp({
     const payload = {
       product_name: productForm.product_name,
       shop_name: productForm.shop_name,
-      shop_rate: number(productForm.shop_rate),
+      product_price: number(productForm.product_price),
+      shop_rate: number(productForm.product_price),
       cutting_rate: number(productForm.cutting_rate || 0)
     };
     const ok = await actions.saveProduct(payload);
     if (ok) {
-      setProductForm({ product_name: "", shop_name: "", shop_rate: "", cutting_rate: "" });
+      setProductForm({ product_name: "", shop_name: "", product_price: "", cutting_rate: "" });
     }
   };
 
@@ -1272,6 +1341,15 @@ export function AdminApp({
       {tab === "dashboard" ? (
         <section className="panel">
           <h2>Live Dashboard</h2>
+          <div className="panel-head">
+            <div>
+              <h3>Central Ledger</h3>
+              <p className="muted">Master payable, receivable, and net balance report.</p>
+            </div>
+            <button type="button" className="button primary" onClick={handleDownloadMasterLedger}>
+              Download Master Ledger
+            </button>
+          </div>
 
           <div className="metrics-grid five">
             <button
@@ -1452,8 +1530,8 @@ export function AdminApp({
                     ))}
                   </select>
                 </label>
-                <label>Shop Rate
-                  <input type="number" className="input" value={productForm.shop_rate} onChange={e => setProductForm({...productForm, shop_rate: e.target.value})} required />
+                <label>Product Price
+                  <input type="number" className="input" value={productForm.product_price} onChange={e => setProductForm({...productForm, product_price: e.target.value})} required />
                 </label>
                 <label>Cutting Rate
                   <input type="number" className="input" value={productForm.cutting_rate} onChange={e => setProductForm({...productForm, cutting_rate: e.target.value})} required />
@@ -1484,13 +1562,13 @@ export function AdminApp({
           <div className="table-wrap" style={{marginTop:'2rem'}}>
             <table>
               <thead>
-                <tr><th>Product</th><th>Shop Rate</th><th>Cutting Rate</th><th>Sub-Products</th></tr>
+                <tr><th>Product</th><th>Product Price</th><th>Cutting Rate</th><th>Sub-Products</th></tr>
               </thead>
               <tbody>
                 {data.products.map(p => (
                   <tr key={p.product_id}>
                     <td>{p.product_name}</td>
-                    <td>{p.shop_rate}</td>
+                    <td>{p.product_price || p.shop_rate}</td>
                     <td>{p.cutting_rate || 0}</td>
                     <td>
                       {data.productSubProducts.filter(s => s.product_id === p.product_id).map(s => (
@@ -1784,6 +1862,8 @@ export function AdminApp({
                   {piece._pendingCount > 1 ? (
                     <p className="muted">Includes {piece._pendingCount} sub-products</p>
                   ) : null}
+                  <p className="muted">Cutting Rate: {formatCurrency(piece.cutting_credit_amount)}</p>
+                  <StatusBadge label="Pending Cutting" tone="cutting" />
                   {piece.reference_slip_url ? (
                     <a className="link" href={piece.reference_slip_url} target="_blank" rel="noreferrer">
                       <img src={piece.reference_slip_url} alt="Reference slip" className="slip-thumb" />
@@ -3011,6 +3091,55 @@ export function AdminApp({
                 </table>
               </div>
             </div>
+          </div>
+        </section>
+      ) : null}
+
+      {tab === "archive" ? (
+        <section className="panel">
+          <div className="panel-head">
+            <div>
+              <h2>Payroll History</h2>
+              <p className="muted">Paid and payroll-settled work is kept here for audit/search.</p>
+            </div>
+            <button type="button" className="button primary" onClick={handleDownloadMasterLedger}>
+              Download Master Ledger
+            </button>
+          </div>
+
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Order</th>
+                  <th>Shop</th>
+                  <th>Piece</th>
+                  <th>Karigar</th>
+                  <th>Amount</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {archivedLedgerRows.map((piece) => {
+                  const order = ordersById[piece.order_id] || {};
+                  return (
+                    <tr key={piece.archive_key}>
+                      <td>{order.order_number || piece.order_id || "-"}</td>
+                      <td>{shopsById[order.shop_id]?.shop_name || order.shop_id || "-"}</td>
+                      <td>{piece.archive_piece_name}</td>
+                      <td>{karigarById[piece.archive_karigar_id]?.name || piece.archive_karigar_id || "-"}</td>
+                      <td>{formatCurrency(piece.archive_amount)}</td>
+                      <td><StatusBadge label="Paid/Payroll Settled" tone="delivered" /></td>
+                    </tr>
+                  );
+                })}
+                {!archivedLedgerRows.length ? (
+                  <tr>
+                    <td colSpan={6} className="muted">No payroll-settled work yet.</td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
           </div>
         </section>
       ) : null}

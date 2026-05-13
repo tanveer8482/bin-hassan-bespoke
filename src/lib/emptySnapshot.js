@@ -20,6 +20,7 @@ export function emptySnapshot() {
     archivedOrders: [],
     orderItems: [],
     pieces: [],
+    archivedPieces: [],
     paymentsShops: [],
     paymentsKarigar: [],
     settings: [],

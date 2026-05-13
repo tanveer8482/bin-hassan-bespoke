@@ -75,6 +75,29 @@ export function KarigarApp({ user, data, onCompletePiece, onMarkPieceCut, busyAc
   const visiblePieces = Array.isArray(data?.pieces)
     ? data.pieces.filter((piece) => piece.assigned_karigar_id === currentKarigarId)
     : [];
+  const archivedPieces = Array.isArray(data?.archivedPieces) ? data.archivedPieces : [];
+  const archivedLedgerRows = useMemo(() => {
+    return archivedPieces.flatMap((piece) => {
+      const rows = [];
+      if (piece.assigned_karigar_id === currentKarigarId && normalizeBool(piece.is_synced)) {
+        rows.push({
+          ...piece,
+          archive_key: `${piece.piece_id}-work`,
+          archive_piece_name: piece.piece_name || piece.sub_product_name || "-",
+          archive_amount: number(piece.karigar_rate) + number(piece.designing_karigar_charge)
+        });
+      }
+      if (piece.cutting_by === currentKarigarId && normalizeBool(piece.cutting_credit_synced)) {
+        rows.push({
+          ...piece,
+          archive_key: `${piece.piece_id}-cutting`,
+          archive_piece_name: `Cutting: ${piece.bundle_piece_type || piece.piece_name}`,
+          archive_amount: number(piece.cutting_credit_amount)
+        });
+      }
+      return rows;
+    });
+  }, [archivedPieces, currentKarigarId]);
 
   const shopsById = useMemo(() => byId(shops, "shop_id"), [shops]);
   const ordersById = useMemo(() => byId(orders, "order_id"), [orders]);
@@ -287,6 +310,12 @@ export function KarigarApp({ user, data, onCompletePiece, onMarkPieceCut, busyAc
           onClick={() => setTab("payments")}
         >
           My Payments
+        </button>
+        <button
+          className={tab === "archive" ? "tab-button active" : "tab-button"}
+          onClick={() => setTab("archive")}
+        >
+          Payroll History
         </button>
         <button
           className={tab === "ledger" ? "tab-button active" : "tab-button"}
@@ -552,6 +581,40 @@ export function KarigarApp({ user, data, onCompletePiece, onMarkPieceCut, busyAc
                   : "No pending cutting pieces right now."}
               </p>
             ) : null}
+          </div>
+        </section>
+      ) : tab === "archive" ? (
+        <section className="panel">
+          <h2>Payroll History</h2>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Order Number</th>
+                  <th>Piece Type</th>
+                  <th>Payment Amount</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {archivedLedgerRows.map((piece) => {
+                  const order = ordersById[piece.order_id] || {};
+                  return (
+                    <tr key={piece.archive_key}>
+                      <td>{order.order_number || piece.order_id || "-"}</td>
+                      <td>{piece.archive_piece_name}</td>
+                      <td>{formatCurrency(piece.archive_amount)}</td>
+                      <td><StatusBadge label="Paid/Payroll Settled" tone="delivered" /></td>
+                    </tr>
+                  );
+                })}
+                {!archivedLedgerRows.length ? (
+                  <tr>
+                    <td colSpan={4} className="muted">No payroll-settled work yet.</td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
           </div>
         </section>
       ) : tab === "payments" ? (

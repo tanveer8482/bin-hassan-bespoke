@@ -101,6 +101,100 @@ export function generateMasterPayrollPdf(syncedPieces, totalAmount) {
 }
 
 /**
+ * Admin Master Ledger Report
+ */
+export function generateMasterLedgerPdf({
+  karigars = [],
+  shops = [],
+  karigarFinancials = {},
+  shopFinancials = {}
+} = {}) {
+  console.log("[PDF] Starting Master Ledger PDF generation", {
+    karigarCount: karigars.length,
+    shopCount: shops.length
+  });
+
+  try {
+    const doc = new jsPDF();
+    const dateStr = formatDate(new Date());
+    addReportHeader(doc, "Master Ledger", `Generated on: ${dateStr}`);
+
+    const karigarRows = karigars.map((karigar) => {
+      const financial = karigarFinancials[karigar.karigar_id] || {};
+      return [
+        karigar.name || karigar.karigar_id || "-",
+        formatCurrency(number(financial.earned)),
+        formatCurrency(number(financial.pending)),
+        formatCurrency(number(financial.paid)),
+        formatCurrency(number(financial.balance) + number(financial.pending))
+      ];
+    });
+
+    const totalPayable = karigars.reduce((sum, karigar) => {
+      const financial = karigarFinancials[karigar.karigar_id] || {};
+      return sum + number(financial.balance) + number(financial.pending);
+    }, 0);
+
+    autoTable(doc, {
+      startY: 50,
+      head: [["Karigar", "Synced Earned", "Pending Sync", "Paid", "Net Payable"]],
+      body: karigarRows.length ? karigarRows : [["-", formatCurrency(0), formatCurrency(0), formatCurrency(0), formatCurrency(0)]],
+      foot: [["", "", "", "Total Payable", formatCurrency(totalPayable)]],
+      theme: "grid",
+      headStyles: { fillColor: [40, 44, 52] },
+      footStyles: { fillColor: [245, 247, 250], textColor: [15, 23, 42], fontStyle: "bold" },
+      styles: { fontSize: 9, cellPadding: 3 }
+    });
+
+    const receivableStartY = doc.lastAutoTable.finalY + 12;
+    const shopRows = shops.map((shop) => {
+      const financial = shopFinancials[shop.shop_id] || {};
+      return [
+        shop.shop_name || shop.shop_id || "-",
+        formatCurrency(number(financial.billed)),
+        formatCurrency(number(financial.paid)),
+        formatCurrency(number(financial.balance))
+      ];
+    });
+    const totalReceivable = shops.reduce(
+      (sum, shop) => sum + number(shopFinancials[shop.shop_id]?.balance),
+      0
+    );
+
+    autoTable(doc, {
+      startY: receivableStartY,
+      head: [["Shop", "Outstanding Orders", "Received", "Net Receivable"]],
+      body: shopRows.length ? shopRows : [["-", formatCurrency(0), formatCurrency(0), formatCurrency(0)]],
+      foot: [["", "", "Total Receivable", formatCurrency(totalReceivable)]],
+      theme: "grid",
+      headStyles: { fillColor: [40, 44, 52] },
+      footStyles: { fillColor: [245, 247, 250], textColor: [15, 23, 42], fontStyle: "bold" },
+      styles: { fontSize: 9, cellPadding: 3 }
+    });
+
+    const summaryStartY = doc.lastAutoTable.finalY + 12;
+    autoTable(doc, {
+      startY: summaryStartY,
+      head: [["Summary", "Amount"]],
+      body: [
+        ["Total Payable to Karigars", formatCurrency(totalPayable)],
+        ["Total Receivable from Shops", formatCurrency(totalReceivable)],
+        ["Final Net Balance", formatCurrency(totalReceivable - totalPayable)]
+      ],
+      theme: "striped",
+      headStyles: { fillColor: [40, 44, 52] },
+      styles: { fontSize: 10, cellPadding: 3 }
+    });
+
+    const safeDate = (dateStr || "unknown").replace(/\//g, "-");
+    doc.save(`Master_Ledger_${safeDate}.pdf`);
+    console.log("[PDF] Master Ledger PDF saved successfully");
+  } catch (error) {
+    console.error("[PDF] Failed to generate Master Ledger PDF:", error);
+  }
+}
+
+/**
  * Karigar Ledger Report
  */
 export function generateKarigarLedgerPdf(karigar, pieces = [], payments = [], summary = {}, ordersById = {}) {

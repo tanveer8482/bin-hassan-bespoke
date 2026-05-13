@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
-import { byId, formatDate, normalizeBool } from "../../lib/format";
+import { byId, formatCurrency, formatDate, normalizeBool } from "../../lib/format";
 import { preparePhotoPayloadForApi } from "../../lib/api";
 import { SearchBar } from "../../components/SearchBar";
+import { StatusBadge } from "../../components/StatusBadge";
 
 export function CuttingApp({ data, onUploadCuttingPhoto, busyAction }) {
   const [uploadError, setUploadError] = useState("");
@@ -102,8 +103,9 @@ export function CuttingApp({ data, onUploadCuttingPhoto, busyAction }) {
                   {piece._pendingCount > 1 ? (
                     <p className="muted">Includes {piece._pendingCount} sub-products</p>
                   ) : null}
-                  <p className="muted">Cutting Rate: {piece.cutting_credit_amount || 0}</p>
+                  <p className="muted">Cutting Rate: {formatCurrency(piece.cutting_credit_amount)}</p>
                   <p className="muted">Delivery: {formatDate(order.delivery_date)}</p>
+                  <StatusBadge label="Pending Cutting" tone="cutting" />
                 </div>
 
                 {piece.reference_slip_url ? (

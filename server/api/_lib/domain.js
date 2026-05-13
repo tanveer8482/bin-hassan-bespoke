@@ -86,8 +86,13 @@ function resolveKarigarPieceRate(karigarRateMap, karigarId, pieceName, itemType)
 }
 
 function computeOrderStatus(order, pieces) {
-  if (normalizeKey(order.status) === STATUS.ORDER.DELIVERED) {
-    return STATUS.ORDER.DELIVERED;
+  const currentStatus = normalizeKey(order.status);
+  if (
+    currentStatus === STATUS.ORDER.DELIVERED ||
+    currentStatus === STATUS.ORDER.SETTLED ||
+    currentStatus === STATUS.ORDER.ARCHIVED
+  ) {
+    return currentStatus;
   }
 
   if (!pieces.length) {
@@ -133,27 +138,47 @@ function groupBy(records, key) {
   }, new Map());
 }
 
+function isPayrollSettledPiece(piece) {
+  return parseBoolean(piece?.is_synced);
+}
+
+function isArchivedPiece(piece) {
+  return parseBoolean(piece?.is_synced) || parseBoolean(piece?.cutting_credit_synced);
+}
+
+function isSettledOrder(order) {
+  const status = normalizeKey(order?.status);
+  return (
+    status === STATUS.ORDER.SETTLED ||
+    status === STATUS.ORDER.ARCHIVED ||
+    parseBoolean(order?.is_archived)
+  );
+}
+
 function buildDashboard(orders, pieces) {
   const now = new Date();
   const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const activePieces = pieces.filter((piece) => !isPayrollSettledPiece(piece));
 
   return {
     total_active_orders: orders.filter(
       (order) =>
+        !isSettledOrder(order) &&
         normalizeKey(order.status) !== STATUS.ORDER.DELIVERED &&
         normalizeKey(order.status) !== STATUS.ORDER.READY
     ).length,
     orders_ready_for_delivery: orders.filter(
-      (order) => normalizeKey(order.status) === STATUS.ORDER.READY
+      (order) => !isSettledOrder(order) && normalizeKey(order.status) === STATUS.ORDER.READY
     ).length,
-    pieces_pending_cutting: pieces.filter(
+    pieces_pending_cutting: activePieces.filter(
       (piece) => !parseBoolean(piece.cutting_done)
     ).length,
-    pieces_assigned_pending_completion: pieces.filter(
+    pieces_assigned_pending_completion: activePieces.filter(
       (piece) => normalizeKey(piece.karigar_status) === STATUS.KARIGAR.ASSIGNED
     ).length,
     overdue_orders: orders.filter((order) => {
       if (!order.delivery_date) return false;
+      if (isSettledOrder(order)) return false;
       if (normalizeKey(order.status) === STATUS.ORDER.DELIVERED) return false;
       const delivery = new Date(order.delivery_date);
       return !Number.isNaN(delivery.getTime()) && delivery < dayStart;
@@ -214,12 +239,21 @@ async function refreshOrderStatuses(targetOrderIds = [], snapshot = null) {
   return updates.length;
 }
 
-function computeOrderTotals(orders, orderItems) {
+function productPrice(product) {
+  return toNumber(product?.product_price || product?.shop_rate);
+}
+
+function computeOrderTotals(orders, orderItems, products = []) {
   const itemsByOrder = groupBy(orderItems, "order_id");
+  const productsById = new Map(products.map((product) => [product.product_id, product]));
 
   return orders.reduce((map, order) => {
     const itemTotal = (itemsByOrder.get(order.order_id) || []).reduce(
-      (sum, item) => sum + toNumber(item.item_rate),
+      (sum, item) => {
+        const explicitRate = toNumber(item.item_rate);
+        if (explicitRate > 0) return sum + explicitRate;
+        return sum + productPrice(productsById.get(item.product_id));
+      },
       0
     );
 
@@ -237,10 +271,11 @@ function computeOrderTotals(orders, orderItems) {
   }, {});
 }
 
-function computeShopFinancials(orders, orderItems, paymentsShops) {
-  const orderTotals = computeOrderTotals(orders, orderItems);
+function computeShopFinancials(orders, orderItems, paymentsShops, products = []) {
+  const orderTotals = computeOrderTotals(orders, orderItems, products);
 
   const billedByShop = orders.reduce((map, order) => {
+    if (isSettledOrder(order)) return map;
     if (!map[order.shop_id]) map[order.shop_id] = 0;
     map[order.shop_id] += orderTotals[order.order_id]?.grand_total || 0;
     return map;
@@ -391,6 +426,7 @@ function filterSnapshotByRole(user, snapshot) {
   const payrollSyncRuns = asArray(snapshot.payrollSyncRuns);
 
   if (user.role === ROLES.ADMIN) {
+    const archivedPieces = piecesAll.filter(isArchivedPiece);
     return {
       ...snapshot,
       users,
@@ -399,6 +435,7 @@ function filterSnapshotByRole(user, snapshot) {
       orders: ordersAll,
       orderItems: orderItemsAll,
       pieces: piecesAll,
+      archivedPieces,
       paymentsShops: paymentsShopsAll,
       paymentsKarigar: paymentsKarigarAll,
       settings,
@@ -414,10 +451,15 @@ function filterSnapshotByRole(user, snapshot) {
     const shopId = user.entity_id;
 
     const orders = ordersAll.filter(
-      (order) => order.shop_id === shopId && !parseBoolean(order.is_archived)
+      (order) =>
+        order.shop_id === shopId &&
+        !parseBoolean(order.is_archived) &&
+        normalizeKey(order.status) !== STATUS.ORDER.SETTLED
     );
     const archivedOrders = ordersAll.filter(
-      (order) => order.shop_id === shopId && parseBoolean(order.is_archived)
+      (order) =>
+        order.shop_id === shopId &&
+        (parseBoolean(order.is_archived) || normalizeKey(order.status) === STATUS.ORDER.SETTLED)
     );
     const allOrderIds = new Set(
       ordersAll.filter((order) => order.shop_id === shopId).map((order) => order.order_id)
@@ -426,12 +468,14 @@ function filterSnapshotByRole(user, snapshot) {
     const orderItems = orderItemsAll.filter((item) => allOrderIds.has(item.order_id));
     const itemIds = new Set(orderItems.map((item) => item.item_id));
 
-    const pieces = piecesAll.filter(
+    const allPieces = piecesAll.filter(
       (piece) => allOrderIds.has(piece.order_id) || itemIds.has(piece.item_id)
     );
+    const pieces = allPieces.filter((piece) => !isPayrollSettledPiece(piece));
+    const archivedPieces = allPieces.filter(isArchivedPiece);
 
     const karigarIds = new Set(
-      pieces
+      allPieces
         .map((piece) => piece.assigned_karigar_id)
         .filter(Boolean)
     );
@@ -451,6 +495,7 @@ function filterSnapshotByRole(user, snapshot) {
       archivedOrders,
       orderItems,
       pieces,
+      archivedPieces,
       shopInvoices,
       shopInvoiceLines: shopInvoiceLinesAll.filter((line) =>
         invoiceIds.has(line.invoice_id)
@@ -481,19 +526,28 @@ function filterSnapshotByRole(user, snapshot) {
     const canHandleCutting = karigarHasRole(currentKarigar, "cutting_master");
 
     const assignedPieces = piecesAll.filter(
-      (piece) => piece.assigned_karigar_id === karigarId
+      (piece) => piece.assigned_karigar_id === karigarId && !parseBoolean(piece.is_synced)
     );
     const cuttingPieces = canHandleCutting
       ? piecesAll.filter(
-          (piece) => !parseBoolean(piece.cutting_done) || piece.cutting_by === karigarId
+          (piece) =>
+            !parseBoolean(piece.cutting_done) ||
+            (piece.cutting_by === karigarId && !parseBoolean(piece.cutting_credit_synced))
         )
       : [];
-    const pieces = Array.from(
+    const archivedPieces = piecesAll.filter(
+      (piece) =>
+        (piece.assigned_karigar_id === karigarId && parseBoolean(piece.is_synced)) ||
+        (piece.cutting_by === karigarId && parseBoolean(piece.cutting_credit_synced))
+    );
+    const allPieces = Array.from(
       new Map([...assignedPieces, ...cuttingPieces].map((piece) => [piece.piece_id, piece])).values()
     );
+    const pieces = allPieces.filter((piece) => !isPayrollSettledPiece(piece));
 
-    const orderIds = new Set(pieces.map((piece) => piece.order_id));
-    const itemIds = new Set(pieces.map((piece) => piece.item_id));
+    const visibleHistoryPieces = [...allPieces, ...archivedPieces];
+    const orderIds = new Set(visibleHistoryPieces.map((piece) => piece.order_id));
+    const itemIds = new Set(visibleHistoryPieces.map((piece) => piece.item_id));
 
     const orders = ordersAll.filter((order) => orderIds.has(order.order_id));
     const orderItems = orderItemsAll.filter(
@@ -512,6 +566,7 @@ function filterSnapshotByRole(user, snapshot) {
       orders,
       orderItems,
       pieces,
+      archivedPieces,
       shopInvoices: [],
       shopInvoiceLines: [],
       payrollSyncRuns: [],
@@ -535,7 +590,9 @@ function filterSnapshotByRole(user, snapshot) {
   }
 
   if (user.role === ROLES.CUTTING) {
-    const pieces = piecesAll.filter((piece) => !parseBoolean(piece.cutting_done));
+    const pieces = piecesAll.filter(
+      (piece) => !parseBoolean(piece.cutting_done) && !isPayrollSettledPiece(piece)
+    );
     const orderIds = new Set(pieces.map((piece) => piece.order_id));
     const itemIds = new Set(pieces.map((piece) => piece.item_id));
 
@@ -646,11 +703,12 @@ function stripPrivateUsers(users) {
 
 function withComputedFields(snapshot) {
   const computed = {
-    orderTotals: computeOrderTotals(snapshot.orders, snapshot.orderItems),
+    orderTotals: computeOrderTotals(snapshot.orders, snapshot.orderItems, snapshot.products),
     shopFinancials: computeShopFinancials(
       snapshot.orders,
       snapshot.orderItems,
-      snapshot.paymentsShops
+      snapshot.paymentsShops,
+      snapshot.products
     ),
     karigarFinancials: computeKarigarFinancials(
       snapshot.pieces,

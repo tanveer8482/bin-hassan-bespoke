@@ -24,6 +24,7 @@ const STATUS = {
     APPROVAL_PENDING: "approval_pending",
     READY: "ready",
     BILLED: "billed",
+    SETTLED: "settled",
     ARCHIVED: "archived",
     DELIVERED: "delivered"
   },
@@ -152,7 +153,7 @@ const REQUIRED_HEADERS = {
   [SHEETS.PAYMENTS_SHOPS]: ["payment_id", "shop_id", "amount", "payment_date", "note", "recorded_by"],
   [SHEETS.PAYMENTS_KARIGAR]: ["payment_id", "karigar_id", "amount", "payment_date", "note", "recorded_by"],
   [SHEETS.SETTINGS]: ["key", "value", "description"],
-  [SHEETS.PRODUCTS]: ["product_id", "product_name", "shop_name", "shop_rate", "cutting_rate", "is_active", "created_date", "updated_date"],
+  [SHEETS.PRODUCTS]: ["product_id", "product_name", "shop_name", "shop_rate", "product_price", "cutting_rate", "is_active", "created_date", "updated_date"],
   [SHEETS.PRODUCT_SUB_PRODUCTS]: ["sub_id", "product_id", "sub_product_name", "worker_rate", "required_skill", "sequence_no", "is_active"],
   [SHEETS.SHOP_INVOICES]: [
     "invoice_id",
