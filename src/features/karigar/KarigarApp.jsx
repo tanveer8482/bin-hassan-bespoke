@@ -38,6 +38,27 @@ function hasRole(worker, role) {
   return new Set([...getRoleValues(worker?.role), ...getRoleValues(worker?.skills)]).has(role);
 }
 
+function normalizeIdentity(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function matchesKarigarUser(karigar, user) {
+  const userKeys = new Set(
+    [user?.entity_id, user?.username, user?.display_name]
+      .map(normalizeIdentity)
+      .filter(Boolean)
+  );
+  return [karigar?.karigar_id, karigar?.name]
+    .map(normalizeIdentity)
+    .filter(Boolean)
+    .some((value) => userKeys.has(value));
+}
+
+function isApprovedPieceStatus(status) {
+  const normalized = normalizeRoleValue(status);
+  return normalized === "complete" || normalized === "approved";
+}
+
 export function KarigarApp({ user, data, onCompletePiece, onMarkPieceCut, busyAction }) {
   const [tab, setTab] = useState("work");
   const [filter, setFilter] = useState("pending");
@@ -47,16 +68,16 @@ export function KarigarApp({ user, data, onCompletePiece, onMarkPieceCut, busyAc
 
   const shops = Array.isArray(data?.shops) ? data.shops : [];
   const orders = Array.isArray(data?.orders) ? data.orders : [];
+  const karigars = Array.isArray(data?.karigars) ? data.karigars : [];
   const paymentsKarigar = Array.isArray(data?.paymentsKarigar) ? data.paymentsKarigar : [];
+  const currentKarigar = karigars.find((karigar) => matchesKarigarUser(karigar, user));
+  const currentKarigarId = user.entity_id || currentKarigar?.karigar_id || "";
   const visiblePieces = Array.isArray(data?.pieces)
-    ? data.pieces.filter((piece) => piece.assigned_karigar_id === user.entity_id)
+    ? data.pieces.filter((piece) => piece.assigned_karigar_id === currentKarigarId)
     : [];
 
   const shopsById = useMemo(() => byId(shops, "shop_id"), [shops]);
   const ordersById = useMemo(() => byId(orders, "order_id"), [orders]);
-  const currentKarigar = (data.karigars || []).find(
-    (karigar) => karigar.karigar_id === user.entity_id
-  );
   const canHandleCutting = hasRole(currentKarigar, "cutting_master");
 
   const pieces = useMemo(() => {
@@ -68,14 +89,26 @@ export function KarigarApp({ user, data, onCompletePiece, onMarkPieceCut, busyAc
     if (filter === "complete") {
       return sorted.filter(
         (piece) =>
-          piece.karigar_status === "complete" || piece.karigar_status === "pending_approval"
+          isApprovedPieceStatus(piece.karigar_status) ||
+          piece.karigar_status === "pending_approval"
       );
     }
     return sorted.filter(
       (piece) =>
-        piece.karigar_status !== "complete" && piece.karigar_status !== "pending_approval"
+        !isApprovedPieceStatus(piece.karigar_status) &&
+        piece.karigar_status !== "pending_approval"
     );
   }, [visiblePieces, filter]);
+
+  const approvedPieces = useMemo(() => {
+    return [...visiblePieces]
+      .filter((piece) => isApprovedPieceStatus(piece.karigar_status))
+      .sort(
+        (a, b) =>
+          new Date(b.karigar_complete_date || b.updated_date || 0) -
+          new Date(a.karigar_complete_date || a.updated_date || 0)
+      );
+  }, [visiblePieces]);
 
   const filteredPieces = useMemo(() => {
     if (!searchQuery.trim()) return pieces;
@@ -87,7 +120,7 @@ export function KarigarApp({ user, data, onCompletePiece, onMarkPieceCut, busyAc
     });
   }, [pieces, searchQuery, ordersById]);
 
-  const paymentSummary = data.computed?.karigarFinancials?.[user.entity_id] || {
+  const paymentSummary = data.computed?.karigarFinancials?.[currentKarigarId] || {
     earned: 0,
     pending: 0,
     paid: 0,
@@ -120,15 +153,15 @@ export function KarigarApp({ user, data, onCompletePiece, onMarkPieceCut, busyAc
   const cuttingLedgerPieces = useMemo(() => {
     if (!canHandleCutting || !Array.isArray(data?.pieces)) return [];
     return data.pieces
-      .filter((piece) => piece.cutting_by === user.entity_id)
+      .filter((piece) => piece.cutting_by === currentKarigarId)
       .map((piece) => ({
         ...piece,
-        assigned_karigar_id: user.entity_id,
+        assigned_karigar_id: currentKarigarId,
         piece_name: `Cutting: ${piece.bundle_piece_type || piece.piece_name}`,
         karigar_rate: piece.cutting_credit_amount,
         karigar_status: normalizeBool(piece.cutting_done) ? "complete" : "assigned"
       }));
-  }, [canHandleCutting, data?.pieces, user.entity_id]);
+  }, [canHandleCutting, currentKarigarId, data?.pieces]);
 
   const ledgerPieces = useMemo(() => {
     const cuttingIds = new Set(cuttingLedgerPieces.map((piece) => `${piece.piece_id}:cutting`));
@@ -153,6 +186,20 @@ export function KarigarApp({ user, data, onCompletePiece, onMarkPieceCut, busyAc
     });
   }, [cuttingPieces, cuttingSearchQuery, ordersById, shopsById]);
 
+  const requestCompletion = async (pieceId, extraPayload = {}) => {
+    setUploadError("");
+    try {
+      const ok = await onCompletePiece({
+        piece_id: pieceId,
+        karigar_id: currentKarigarId,
+        ...extraPayload
+      });
+      if (ok === false) setUploadError("Completion request could not be queued.");
+    } catch (error) {
+      setUploadError(error.message || "Completion request failed");
+    }
+  };
+
   const submitCompletionPhoto = async (pieceId, file) => {
     if (!file) return;
 
@@ -172,10 +219,7 @@ export function KarigarApp({ user, data, onCompletePiece, onMarkPieceCut, busyAc
         })
       );
 
-      await onCompletePiece({
-        piece_id: pieceId,
-        ...payload
-      });
+      await requestCompletion(pieceId, payload);
     } catch (error) {
       if (/too large/i.test(error.message || "")) {
         window.alert(error.message);
@@ -223,6 +267,12 @@ export function KarigarApp({ user, data, onCompletePiece, onMarkPieceCut, busyAc
           onClick={() => setTab("work")}
         >
           My Work
+        </button>
+        <button
+          className={tab === "approved" ? "tab-button active" : "tab-button"}
+          onClick={() => setTab("approved")}
+        >
+          Approved Work
         </button>
         {canHandleCutting ? (
           <button
@@ -330,7 +380,7 @@ export function KarigarApp({ user, data, onCompletePiece, onMarkPieceCut, busyAc
 
                       <button 
                         className="button secondary small"
-                        onClick={() => onCompletePiece({ piece_id: piece.piece_id })}
+                        onClick={() => requestCompletion(piece.piece_id)}
                         disabled={busyAction === `complete:${piece.piece_id}`}
                         style={{marginTop: '0.5rem'}}
                       >
@@ -363,6 +413,46 @@ export function KarigarApp({ user, data, onCompletePiece, onMarkPieceCut, busyAc
                   : "No pieces found for this filter."}
               </p>
             ) : null}
+          </div>
+        </section>
+      ) : tab === "approved" ? (
+        <section className="panel">
+          <div className="panel-head">
+            <h2>Approved Work</h2>
+            <StatusBadge label={`${approvedPieces.length} Approved`} tone="ready" />
+          </div>
+
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Order Number</th>
+                  <th>Piece Type</th>
+                  <th>Payment Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {approvedPieces.map((piece) => {
+                  const order = ordersById[piece.order_id];
+                  const paymentAmount =
+                    number(piece.karigar_rate) + number(piece.designing_karigar_charge);
+                  return (
+                    <tr key={piece.piece_id}>
+                      <td>{order?.order_number || "-"}</td>
+                      <td>{piece.piece_name || piece.sub_product_name || "-"}</td>
+                      <td>{formatCurrency(paymentAmount)}</td>
+                    </tr>
+                  );
+                })}
+                {!approvedPieces.length ? (
+                  <tr>
+                    <td colSpan={3} className="muted">
+                      No approved work yet.
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
           </div>
         </section>
       ) : tab === "cutting" && canHandleCutting ? (
@@ -520,7 +610,13 @@ export function KarigarApp({ user, data, onCompletePiece, onMarkPieceCut, busyAc
               className="button primary"
               onClick={() => {
                 console.log("[KARIGAR_LEDGER_CLICK]", { user, pieceCount: ledgerPieces.length });
-                generateKarigarLedgerPdf(user, ledgerPieces, paymentsKarigar, paymentSummary);
+                generateKarigarLedgerPdf(
+                  currentKarigar || user,
+                  ledgerPieces,
+                  paymentsKarigar,
+                  paymentSummary,
+                  ordersById
+                );
               }}
             >
               Download My Ledger (PDF)

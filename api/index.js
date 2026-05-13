@@ -453,21 +453,38 @@ async function requestApproval(req, res) {
   await ensureWorkbook();
   const body = await parseBody(req);
   requireFields(body, ["piece_id"]);
-  const updates = { karigar_status: STATUS.KARIGAR.PENDING_APPROVAL, karigar_complete_date: nowISO(), updated_date: nowISO() };
-  if (body.photo_data_url) {
-    const res = await resolvePhotoInput({ photoDataUrl: body.photo_data_url, folder: "completion" });
-    updates.completion_photo_url = res.photoUrl;
+  const now = nowISO();
+  const updates = {
+    karigar_status: STATUS.KARIGAR.PENDING_APPROVAL,
+    karigar_complete_date: now,
+    approval_requested_by: user.entity_id || user.username || "",
+    approval_requested_date: now,
+    updated_date: now
+  };
+  if (body.photo_url) {
+    updates.completion_photo_url = normalizeText(body.photo_url);
+  } else if (body.photo_data_url) {
+    const resolved = await resolvePhotoInput({ photoDataUrl: body.photo_data_url, folder: "completion" });
+    updates.completion_photo_url = resolved.photoUrl;
   }
   await updateByField(SHEETS.PIECES, "piece_id", body.piece_id, updates);
   sendOk(res, { message: "Approval requested" });
 }
 
 async function approvePiece(req, res) {
-  requireRole(req, [ROLES.ADMIN]);
+  const user = requireRole(req, [ROLES.ADMIN]);
   await ensureWorkbook();
   const body = await parseBody(req);
   requireFields(body, ["piece_id"]);
-  const updates = { karigar_status: STATUS.KARIGAR.COMPLETE, completion_verified: "TRUE", completion_verified_date: nowISO(), updated_date: nowISO() };
+  const now = nowISO();
+  const updates = {
+    karigar_status: STATUS.KARIGAR.COMPLETE,
+    approved_by: user.username || "",
+    approved_date: now,
+    completion_verified: "TRUE",
+    completion_verified_date: now,
+    updated_date: now
+  };
   await updateByField(SHEETS.PIECES, "piece_id", body.piece_id, updates);
   sendOk(res, { message: "Piece approved" });
 }

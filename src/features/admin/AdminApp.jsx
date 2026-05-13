@@ -128,6 +128,15 @@ function karigarHasRequiredRole(karigar, requiredRole) {
   return roles.has(requiredRole);
 }
 
+function isApprovedPiece(piece) {
+  const status = normalizeRoleValue(piece?.karigar_status);
+  return status === "complete" || status === "approved";
+}
+
+function isPendingApprovalPiece(piece) {
+  return normalizeRoleValue(piece?.karigar_status) === "pending_approval";
+}
+
 function pieceMatchesAssignTab(piece, activeTab) {
   if (activeTab === "all") return true;
   const normalized = normalizeRoleValue(piece.piece_name);
@@ -146,11 +155,16 @@ function OrderListCard({
   busyAction,
   onToggle,
   onStatusChange,
+  onApprovePiece,
+  onDeliverOrder,
   onAssignWork
 }) {
   const badge = orderBadge(order.status);
   const statusBusy =
     busyAction === "updateOrder" || busyAction === `deliver:${order.order_id}`;
+  const readyForDelivery =
+    order.status === "ready" ||
+    (!!orderPieces.length && orderPieces.every((piece) => isApprovedPiece(piece)));
 
   return (
     <article className={`order-row-card ${isExpanded ? "expanded" : ""}`}>
@@ -202,12 +216,25 @@ function OrderListCard({
             {orderPieces.length ? (
               orderPieces.map((piece) => {
                 const pBadge = pieceBadge(piece.karigar_status);
+                const approvalBusy = busyAction === `approve:${piece.piece_id}`;
                 return (
                   <div className="inline-list-row" key={piece.piece_id}>
                     <span>
                       {piece.piece_name} - {piece.item_type}
                     </span>
-                    <StatusBadge label={pBadge.label} tone={pBadge.tone} />
+                    <span className="piece-row-actions">
+                      {isPendingApprovalPiece(piece) ? (
+                        <button
+                          type="button"
+                          className="button success small"
+                          onClick={() => onApprovePiece(piece.piece_id)}
+                          disabled={approvalBusy}
+                        >
+                          {approvalBusy ? "Approving..." : "Approve"}
+                        </button>
+                      ) : null}
+                      <StatusBadge label={pBadge.label} tone={pBadge.tone} />
+                    </span>
                   </div>
                 );
               })
@@ -243,6 +270,19 @@ function OrderListCard({
             <button type="button" className="button ghost" onClick={onAssignWork}>
               Assign Work
             </button>
+
+            {readyForDelivery && order.status !== "delivered" ? (
+              <button
+                type="button"
+                className="button success"
+                onClick={onDeliverOrder}
+                disabled={busyAction === `deliver:${order.order_id}`}
+              >
+                {busyAction === `deliver:${order.order_id}`
+                  ? "Delivering..."
+                  : "Mark as Delivered"}
+              </button>
+            ) : null}
           </div>
         </div>
       ) : null}
@@ -346,6 +386,7 @@ export function AdminApp({
   const [assignWorkTab, setAssignWorkTab] = useState("all");
   const [selectedShopId, setSelectedShopId] = useState("");
   const [selectedKarigarId, setSelectedKarigarId] = useState("");
+  const [karigarProfileTab, setKarigarProfileTab] = useState("history");
   const [cuttingDraft, setCuttingDraft] = useState({});
 
   const [assignDraft, setAssignDraft] = useState({});
@@ -501,7 +542,7 @@ export function AdminApp({
   }, [dashboardFilter]);
 
   const pendingApprovalCount = useMemo(
-    () => data.pieces.filter((piece) => piece.karigar_status === "pending_approval").length,
+    () => data.pieces.filter(isPendingApprovalPiece).length,
     [data.pieces]
   );
 
@@ -531,11 +572,11 @@ export function AdminApp({
       }
       if (dashboardFilter === "pendingApproval") {
         const orderPieces = piecesByOrder[order.order_id] || [];
-        if (!orderPieces.some((piece) => piece.karigar_status === "pending_approval")) return false;
+        if (!orderPieces.some(isPendingApprovalPiece)) return false;
       }
       if (dashboardFilter === "ready") {
         const orderPieces = piecesByOrder[order.order_id] || [];
-        if (!orderPieces.length || !orderPieces.every((piece) => piece.karigar_status === "complete")) return false;
+        if (!orderPieces.length || !orderPieces.every(isApprovedPiece)) return false;
       }
 
       return true;
@@ -604,7 +645,7 @@ export function AdminApp({
 
     data.orders.forEach((order) => {
       const pieces = piecesByOrder[order.order_id] || [];
-      const pendingPieces = pieces.filter((piece) => piece.karigar_status !== "complete");
+      const pendingPieces = pieces.filter((piece) => !isApprovedPiece(piece));
 
       if (!pendingPieces.length) {
         ready.push(order);
@@ -644,7 +685,7 @@ export function AdminApp({
       const assignedPieces = data.pieces.filter(
         (piece) =>
           piece.assigned_karigar_id === karigar.karigar_id &&
-          piece.karigar_status !== "complete"
+          !isApprovedPiece(piece)
       );
 
       const assignedDays = assignedPieces
@@ -662,7 +703,7 @@ export function AdminApp({
       const completedPieces = data.pieces.filter(
         (piece) =>
           piece.assigned_karigar_id === karigar.karigar_id &&
-          piece.karigar_status === "complete"
+          isApprovedPiece(piece)
       );
 
       const weekAgo = new Date(now);
@@ -725,8 +766,59 @@ export function AdminApp({
     (piece) =>
       piece.cutting_by === selectedKarigar?.karigar_id
         ? normalizeBool(piece.cutting_done)
-        : piece.karigar_status === "complete" || piece.karigar_status === "pending_approval"
+        : isApprovedPiece(piece) || isPendingApprovalPiece(piece)
   ).length;
+  const selectedKarigarApprovedPieces = selectedKarigarPieces.filter((piece) =>
+    piece.cutting_by === selectedKarigar?.karigar_id
+      ? normalizeBool(piece.cutting_done)
+      : isApprovedPiece(piece)
+  );
+
+  const financialOverview = useMemo(() => {
+    const karigarRows = data.karigars
+      .map((karigar) => {
+        const financial = data.computed?.karigarFinancials?.[karigar.karigar_id] || {
+          earned: 0,
+          pending: 0,
+          paid: 0,
+          balance: 0
+        };
+        const payable = Math.max(0, number(financial.balance) + number(financial.pending));
+        return {
+          id: karigar.karigar_id,
+          name: karigar.name,
+          payable,
+          pending: number(financial.pending),
+          balance: number(financial.balance)
+        };
+      })
+      .filter((row) => row.payable > 0)
+      .sort((a, b) => b.payable - a.payable);
+
+    const shopRows = data.shops
+      .map((shop) => {
+        const financial = data.computed?.shopFinancials?.[shop.shop_id] || {
+          billed: 0,
+          paid: 0,
+          balance: 0
+        };
+        const receivable = Math.max(0, number(financial.balance));
+        return {
+          id: shop.shop_id,
+          name: shop.shop_name,
+          receivable
+        };
+      })
+      .filter((row) => row.receivable > 0)
+      .sort((a, b) => b.receivable - a.receivable);
+
+    return {
+      karigarRows,
+      shopRows,
+      totalPayable: karigarRows.reduce((sum, row) => sum + row.payable, 0),
+      totalReceivable: shopRows.reduce((sum, row) => sum + row.receivable, 0)
+    };
+  }, [data.computed?.karigarFinancials, data.computed?.shopFinancials, data.karigars, data.shops]);
 
   const submitOrder = async (event) => {
     event.preventDefault();
@@ -834,10 +926,16 @@ export function AdminApp({
   const updateOrderStatus = async (orderId, status) => {
     if (!status || ordersById[orderId]?.status === status) return;
 
-    await actions.updateOrder({
+    const payload = {
       order_id: orderId,
       status
-    });
+    };
+
+    if (status === "delivered") {
+      payload.is_archived = true;
+    }
+
+    await actions.updateOrder(payload);
   };
 
   const updateOrderItem = (index, field, value) => {
@@ -908,6 +1006,14 @@ export function AdminApp({
 
   const handleApprovePiece = async (pieceId) => {
     await actions.approvePiece({ piece_id: pieceId });
+  };
+
+  const handleRequestPieceApproval = async (pieceId) => {
+    await actions.completePiece({ piece_id: pieceId });
+  };
+
+  const handleMarkOrderDelivered = async (orderId) => {
+    await updateOrderStatus(orderId, "delivered");
   };
 
   const submitProduct = async (event) => {
@@ -1077,7 +1183,7 @@ export function AdminApp({
     const pendingPieces = (data.pieces || []).filter(
       (p) =>
         p.assigned_karigar_id === karigarEditForm.karigar_id &&
-        p.karigar_status !== "complete"
+        !isApprovedPiece(p)
     );
 
     if (pendingPieces.length > 0) {
@@ -1102,9 +1208,7 @@ export function AdminApp({
       {orders.map((order) => {
         const orderPieces = piecesByOrder[order.order_id] || [];
         const orderItems = orderItemsByOrder[order.order_id] || [];
-        const completeCount = orderPieces.filter(
-          (piece) => piece.karigar_status === "complete"
-        ).length;
+        const completeCount = orderPieces.filter(isApprovedPiece).length;
         const total = data.computed?.orderTotals?.[order.order_id]?.grand_total || 0;
         const shopName = shopsById[order.shop_id]?.shop_name || order.shop_id || "-";
         const isExpanded = expandedOrderId === order.order_id;
@@ -1126,6 +1230,8 @@ export function AdminApp({
               )
             }
             onStatusChange={(status) => updateOrderStatus(order.order_id, status)}
+            onApprovePiece={handleApprovePiece}
+            onDeliverOrder={() => handleMarkOrderDelivered(order.order_id)}
             onAssignWork={() => {
               if (typeof onOrderSearchChange === "function") {
                 onOrderSearchChange(order.order_number?.toString() || "");
@@ -1143,6 +1249,11 @@ export function AdminApp({
       ) : null}
     </div>
   );
+
+  const isMainShopsTab = tab === "shops";
+  const isSettingsShopsTab = tab === "settings" && settingsTab === "shops";
+  const isMainKarigarTab = tab === "karigar";
+  const isSettingsKarigarTab = tab === "settings" && settingsTab === "karigar";
 
   return (
     <div className="role-shell">
@@ -1217,6 +1328,50 @@ export function AdminApp({
               <p>Ready for Delivery</p>
               <h3>{dashboard.orders_ready_for_delivery}</h3>
             </button>
+          </div>
+
+          <div className="financial-stats-grid">
+            <div className="panel inset financial-stats-card">
+              <div className="panel-head">
+                <div>
+                  <h3>Payable to Karigars</h3>
+                  <p className="muted">Approved and pending-sync work liability</p>
+                </div>
+                <strong>{formatCurrency(financialOverview.totalPayable)}</strong>
+              </div>
+              <div className="inline-list compact-list">
+                {financialOverview.karigarRows.slice(0, 6).map((row) => (
+                  <div className="inline-list-row" key={row.id}>
+                    <span>{row.name}</span>
+                    <strong>{formatCurrency(row.payable)}</strong>
+                  </div>
+                ))}
+                {!financialOverview.karigarRows.length ? (
+                  <p className="muted">No payable balance right now.</p>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="panel inset financial-stats-card">
+              <div className="panel-head">
+                <div>
+                  <h3>Receivable from Shops</h3>
+                  <p className="muted">Outstanding shop billing balance</p>
+                </div>
+                <strong>{formatCurrency(financialOverview.totalReceivable)}</strong>
+              </div>
+              <div className="inline-list compact-list">
+                {financialOverview.shopRows.slice(0, 6).map((row) => (
+                  <div className="inline-list-row" key={row.id}>
+                    <span>{row.name}</span>
+                    <strong>{formatCurrency(row.receivable)}</strong>
+                  </div>
+                ))}
+                {!financialOverview.shopRows.length ? (
+                  <p className="muted">No receivable balance right now.</p>
+                ) : null}
+              </div>
+            </div>
           </div>
 
           {dashboardFilter !== "all" ? (
@@ -1813,231 +1968,236 @@ export function AdminApp({
         </section>
       ) : null}
 
-      {tab === "shops" || (tab === "settings" && settingsTab === "shops") ? (
+      {isMainShopsTab || isSettingsShopsTab ? (
         <section className="panel">
           <h2>Shops</h2>
 
-          <div className="split-grid">
-            <form className="panel inset" onSubmit={submitShop}>
-              <h3>Add Shop</h3>
-              <p className="muted">
-                Login username will be the same as the shop name.
-              </p>
-              <label>
-                Shop Name
-                <input
-                  className="input"
-                  value={shopForm.shop_name}
-                  onChange={(event) =>
-                    setShopForm((current) => ({
-                      ...current,
-                      shop_name: event.target.value
-                    }))
-                  }
-                  required
-                />
-              </label>
-              <label>
-                Contact
-                <input
-                  className="input"
-                  value={shopForm.contact}
-                  onChange={(event) =>
-                    setShopForm((current) => ({
-                      ...current,
-                      contact: event.target.value
-                    }))
-                  }
-                />
-              </label>
-              <label>
-                Login Password
-                <input
-                  type="password"
-                  className="input"
-                  value={shopForm.password}
-                  onChange={(event) =>
-                    setShopForm((current) => ({
-                      ...current,
-                      password: event.target.value
-                    }))
-                  }
-                  required
-                />
-              </label>
-              <button className="button" type="submit">
-                Save Shop
-              </button>
-            </form>
+          {isSettingsShopsTab ? (
+            <>
+              <div className="split-grid">
+                <form className="panel inset" onSubmit={submitShop}>
+                  <h3>Add Shop</h3>
+                  <p className="muted">
+                    Login username will be the same as the shop name.
+                  </p>
+                  <label>
+                    Shop Name
+                    <input
+                      className="input"
+                      value={shopForm.shop_name}
+                      onChange={(event) =>
+                        setShopForm((current) => ({
+                          ...current,
+                          shop_name: event.target.value
+                        }))
+                      }
+                      required
+                    />
+                  </label>
+                  <label>
+                    Contact
+                    <input
+                      className="input"
+                      value={shopForm.contact}
+                      onChange={(event) =>
+                        setShopForm((current) => ({
+                          ...current,
+                          contact: event.target.value
+                        }))
+                      }
+                    />
+                  </label>
+                  <label>
+                    Login Password
+                    <input
+                      type="password"
+                      className="input"
+                      value={shopForm.password}
+                      onChange={(event) =>
+                        setShopForm((current) => ({
+                          ...current,
+                          password: event.target.value
+                        }))
+                      }
+                      required
+                    />
+                  </label>
+                  <button className="button" type="submit">
+                    Save Shop
+                  </button>
+                </form>
 
-            <form className="panel inset" onSubmit={submitShopUpdate}>
-              <h3>Edit Shop</h3>
-              <label>
-                Select Shop
-                <select
-                  className="input"
-                  value={shopEditForm.shop_id}
-                  onChange={(event) => {
-                    const selected = data.shops.find(
-                      (shop) => shop.shop_id === event.target.value
-                    );
-                    setShopEditForm({
-                      shop_id: selected?.shop_id || "",
-                      shop_name: selected?.shop_name || "",
-                      contact: selected?.contact || "",
-                      password: ""
-                    });
-                  }}
-                >
-                  <option value="">Select shop</option>
-                  {data.shops.map((shop) => (
-                    <option key={shop.shop_id} value={shop.shop_id}>
-                      {shop.shop_name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Shop Name
-                <input
-                  className="input"
-                  value={shopEditForm.shop_name}
-                  onChange={(event) =>
-                    setShopEditForm((current) => ({
-                      ...current,
-                      shop_name: event.target.value
-                    }))
-                  }
-                />
-              </label>
-              <label>
-                Contact
-                <input
-                  className="input"
-                  value={shopEditForm.contact}
-                  onChange={(event) =>
-                    setShopEditForm((current) => ({
-                      ...current,
-                      contact: event.target.value
-                    }))
-                  }
-                />
-              </label>
-              <p className="muted">
-                Login username: {shopUsersByEntityId[shopEditForm.shop_id]?.username || shopEditForm.shop_name || "-"}
-              </p>
-              <label>
-                Reset Password (optional)
-                <input
-                  type="password"
-                  className="input"
-                  value={shopEditForm.password}
-                  onChange={(event) =>
-                    setShopEditForm((current) => ({
-                      ...current,
-                      password: event.target.value
-                    }))
-                  }
-                />
-              </label>
-              <button className="button" type="submit" disabled={!shopEditForm.shop_id}>
-                Update Shop
-              </button>
-              <button
-                className="button danger ghost"
-                type="button"
-                onClick={handleDeleteShop}
-                disabled={!shopEditForm.shop_id || busyAction === `deleteShop:${shopEditForm.shop_id}`}
-              >
-                {busyAction === `deleteShop:${shopEditForm.shop_id}` ? "Deleting..." : "Delete Shop"}
-              </button>
-            </form>
-          </div>
+                <form className="panel inset" onSubmit={submitShopUpdate}>
+                  <h3>Edit Shop</h3>
+                  <label>
+                    Select Shop
+                    <select
+                      className="input"
+                      value={shopEditForm.shop_id}
+                      onChange={(event) => {
+                        const selected = data.shops.find(
+                          (shop) => shop.shop_id === event.target.value
+                        );
+                        setShopEditForm({
+                          shop_id: selected?.shop_id || "",
+                          shop_name: selected?.shop_name || "",
+                          contact: selected?.contact || "",
+                          password: ""
+                        });
+                      }}
+                    >
+                      <option value="">Select shop</option>
+                      {data.shops.map((shop) => (
+                        <option key={shop.shop_id} value={shop.shop_id}>
+                          {shop.shop_name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Shop Name
+                    <input
+                      className="input"
+                      value={shopEditForm.shop_name}
+                      onChange={(event) =>
+                        setShopEditForm((current) => ({
+                          ...current,
+                          shop_name: event.target.value
+                        }))
+                      }
+                    />
+                  </label>
+                  <label>
+                    Contact
+                    <input
+                      className="input"
+                      value={shopEditForm.contact}
+                      onChange={(event) =>
+                        setShopEditForm((current) => ({
+                          ...current,
+                          contact: event.target.value
+                        }))
+                      }
+                    />
+                  </label>
+                  <p className="muted">
+                    Login username: {shopUsersByEntityId[shopEditForm.shop_id]?.username || shopEditForm.shop_name || "-"}
+                  </p>
+                  <label>
+                    Reset Password (optional)
+                    <input
+                      type="password"
+                      className="input"
+                      value={shopEditForm.password}
+                      onChange={(event) =>
+                        setShopEditForm((current) => ({
+                          ...current,
+                          password: event.target.value
+                        }))
+                      }
+                    />
+                  </label>
+                  <button className="button" type="submit" disabled={!shopEditForm.shop_id}>
+                    Update Shop
+                  </button>
+                  <button
+                    className="button danger ghost"
+                    type="button"
+                    onClick={handleDeleteShop}
+                    disabled={!shopEditForm.shop_id || busyAction === `deleteShop:${shopEditForm.shop_id}`}
+                  >
+                    {busyAction === `deleteShop:${shopEditForm.shop_id}` ? "Deleting..." : "Delete Shop"}
+                  </button>
+                </form>
+              </div>
 
-          <form className="panel inset" onSubmit={submitShopRate}>
-            <h3>Set Shop Rate</h3>
-            <div className="form-grid three">
-              <label>
-                Shop
-                <select
-                  className="input"
-                  value={shopRateForm.shop_id}
-                  onChange={(event) =>
-                    setShopRateForm((current) => ({
-                      ...current,
-                      shop_id: event.target.value
-                    }))
-                  }
-                  required
-                >
-                  <option value="">Select shop</option>
-                  {data.shops.map((shop) => (
-                    <option key={shop.shop_id} value={shop.shop_id}>
-                      {shop.shop_name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Piece Name
-                <select
-                  className="input"
-                  value={shopRateForm.piece_name}
-                  onChange={(event) =>
-                    setShopRateForm((current) => ({
-                      ...current,
-                      piece_name: event.target.value
-                    }))
-                  }
-                >
-                  {PIECE_TYPES.map((pieceType) => (
-                    <option key={pieceType} value={pieceType}>
-                      {pieceType}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Item Type
-                <select
-                  className="input"
-                  value={shopRateForm.item_type}
-                  onChange={(event) =>
-                    setShopRateForm((current) => ({
-                      ...current,
-                      item_type: event.target.value
-                    }))
-                  }
-                >
-                  {ITEM_TYPES.map((itemType) => (
-                    <option key={itemType} value={itemType}>
-                      {itemType}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Rate
-                <input
-                  type="number"
-                  className="input"
-                  min="0"
-                  value={shopRateForm.rate}
-                  onChange={(event) =>
-                    setShopRateForm((current) => ({
-                      ...current,
-                      rate: event.target.value
-                    }))
-                  }
-                  required
-                />
-              </label>
-            </div>
-            <button className="button" type="submit">
-              Save Shop Rate
-            </button>
-          </form>
+              <form className="panel inset" onSubmit={submitShopRate}>
+                <h3>Set Shop Rate</h3>
+                <div className="form-grid three">
+                  <label>
+                    Shop
+                    <select
+                      className="input"
+                      value={shopRateForm.shop_id}
+                      onChange={(event) =>
+                        setShopRateForm((current) => ({
+                          ...current,
+                          shop_id: event.target.value
+                        }))
+                      }
+                      required
+                    >
+                      <option value="">Select shop</option>
+                      {data.shops.map((shop) => (
+                        <option key={shop.shop_id} value={shop.shop_id}>
+                          {shop.shop_name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Piece Name
+                    <select
+                      className="input"
+                      value={shopRateForm.piece_name}
+                      onChange={(event) =>
+                        setShopRateForm((current) => ({
+                          ...current,
+                          piece_name: event.target.value
+                        }))
+                      }
+                    >
+                      {PIECE_TYPES.map((pieceType) => (
+                        <option key={pieceType} value={pieceType}>
+                          {pieceType}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Item Type
+                    <select
+                      className="input"
+                      value={shopRateForm.item_type}
+                      onChange={(event) =>
+                        setShopRateForm((current) => ({
+                          ...current,
+                          item_type: event.target.value
+                        }))
+                      }
+                    >
+                      {ITEM_TYPES.map((itemType) => (
+                        <option key={itemType} value={itemType}>
+                          {itemType}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Rate
+                    <input
+                      type="number"
+                      className="input"
+                      min="0"
+                      value={shopRateForm.rate}
+                      onChange={(event) =>
+                        setShopRateForm((current) => ({
+                          ...current,
+                          rate: event.target.value
+                        }))
+                      }
+                      required
+                    />
+                  </label>
+                </div>
+                <button className="button" type="submit">
+                  Save Shop Rate
+                </button>
+              </form>
+            </>
+          ) : null}
 
+          {isMainShopsTab ? (
           <div className="entity-dashboard">
             <div className="entity-list-panel">
               <h3>Partner Shops</h3>
@@ -2127,7 +2287,9 @@ export function AdminApp({
               )}
             </div>
           </div>
+          ) : null}
 
+          {isSettingsShopsTab ? (
           <div className="table-wrap">
             <table>
               <thead>
@@ -2160,13 +2322,16 @@ export function AdminApp({
               </tbody>
             </table>
           </div>
+          ) : null}
         </section>
       ) : null}
 
-      {tab === "karigar" || (tab === "settings" && settingsTab === "karigar") ? (
+      {isMainKarigarTab || isSettingsKarigarTab ? (
         <section className="panel">
           <h2>Karigar</h2>
 
+          {isSettingsKarigarTab ? (
+            <>
           <div className="split-grid">
             <form className="panel inset" onSubmit={submitKarigar}>
               <h3>Add Karigar</h3>
@@ -2427,7 +2592,10 @@ export function AdminApp({
               Save Karigar Rate
             </button>
           </form>
+            </>
+          ) : null}
 
+          {isMainKarigarTab ? (
           <div className="entity-dashboard">
             <div className="entity-list-panel">
               <h3>Workers</h3>
@@ -2489,10 +2657,29 @@ export function AdminApp({
                     </div>
                   </div>
 
+                  <div className="tab-row wrap compact-tabs">
+                    <button
+                      type="button"
+                      className={karigarProfileTab === "history" ? "tab-button active" : "tab-button"}
+                      onClick={() => setKarigarProfileTab("history")}
+                    >
+                      Work History
+                    </button>
+                    <button
+                      type="button"
+                      className={karigarProfileTab === "approved" ? "tab-button active" : "tab-button"}
+                      onClick={() => setKarigarProfileTab("approved")}
+                    >
+                      Approved Work
+                    </button>
+                  </div>
+
+                  {karigarProfileTab === "history" ? (
                   <div className="inline-list entity-history">
                     {selectedKarigarPieces.slice(0, 10).map((piece) => {
                       const order = ordersById[piece.order_id];
                       const isCuttingCredit = piece.cutting_by === selectedKarigar.karigar_id;
+                      const requestBusy = busyAction === `complete:${piece.piece_id}`;
                       return (
                         <div className="inline-list-row" key={`${piece.piece_id}-${isCuttingCredit ? "cut" : "work"}`}>
                           <span>
@@ -2503,18 +2690,30 @@ export function AdminApp({
                             </strong>{" "}
                             - Order {order?.order_number || "-"}
                           </span>
-                          <StatusBadge
-                            label={
-                              isCuttingCredit
-                                ? "Cut"
-                                : pieceBadge(piece.karigar_status).label
-                            }
-                            tone={
-                              isCuttingCredit
-                                ? "cutting"
-                                : pieceBadge(piece.karigar_status).tone
-                            }
-                          />
+                          <span className="piece-row-actions">
+                            {!isCuttingCredit && piece.karigar_status === "assigned" ? (
+                              <button
+                                type="button"
+                                className="button small"
+                                onClick={() => handleRequestPieceApproval(piece.piece_id)}
+                                disabled={requestBusy}
+                              >
+                                {requestBusy ? "Sending..." : "Request Approval"}
+                              </button>
+                            ) : null}
+                            <StatusBadge
+                              label={
+                                isCuttingCredit
+                                  ? "Cut"
+                                  : pieceBadge(piece.karigar_status).label
+                              }
+                              tone={
+                                isCuttingCredit
+                                  ? "cutting"
+                                  : pieceBadge(piece.karigar_status).tone
+                              }
+                            />
+                          </span>
                         </div>
                       );
                     })}
@@ -2522,6 +2721,30 @@ export function AdminApp({
                       <p className="muted">No work history for this karigar yet.</p>
                     ) : null}
                   </div>
+                  ) : (
+                  <div className="inline-list entity-history">
+                    {selectedKarigarApprovedPieces.map((piece) => {
+                      const order = ordersById[piece.order_id];
+                      const isCuttingCredit = piece.cutting_by === selectedKarigar.karigar_id;
+                      return (
+                        <div className="inline-list-row" key={`${piece.piece_id}-approved-${isCuttingCredit ? "cut" : "work"}`}>
+                          <span>
+                            <strong>
+                              {isCuttingCredit
+                                ? `Cutting: ${piece.bundle_piece_type || piece.piece_name}`
+                                : piece.piece_name}
+                            </strong>{" "}
+                            - Order {order?.order_number || "-"}
+                          </span>
+                          <StatusBadge label="Approved" tone="ready" />
+                        </div>
+                      );
+                    })}
+                    {!selectedKarigarApprovedPieces.length ? (
+                      <p className="muted">No approved work yet.</p>
+                    ) : null}
+                  </div>
+                  )}
 
                   <div className="inline-list entity-history">
                     {selectedKarigarPayments.slice(0, 5).map((payment) => (
@@ -2540,7 +2763,9 @@ export function AdminApp({
               )}
             </div>
           </div>
+          ) : null}
 
+          {isSettingsKarigarTab ? (
           <div className="table-wrap">
             <table>
               <thead>
@@ -2574,6 +2799,7 @@ export function AdminApp({
               </tbody>
             </table>
           </div>
+          ) : null}
         </section>
       ) : null}
 
@@ -2799,7 +3025,7 @@ export function AdminApp({
               <h3>Overdue</h3>
               {trackSummary.overdue.map((order) => {
                 const pending = (piecesByOrder[order.order_id] || []).filter(
-                  (piece) => piece.karigar_status !== "complete"
+                  (piece) => !isApprovedPiece(piece)
                 );
                 return (
                   <div className="track-card" key={`overdue-${order.order_id}`}>
@@ -2825,7 +3051,7 @@ export function AdminApp({
               <h3>Due Today</h3>
               {trackSummary.dueToday.map((order) => {
                 const pending = (piecesByOrder[order.order_id] || []).filter(
-                  (piece) => piece.karigar_status !== "complete"
+                  (piece) => !isApprovedPiece(piece)
                 );
                 return (
                   <div className="track-card" key={`today-${order.order_id}`}>
@@ -2867,10 +3093,22 @@ export function AdminApp({
               <h3>Ready Orders</h3>
               {trackSummary.ready.map((order) => (
                 <div className="track-card" key={`ready-${order.order_id}`}>
-                  <p>
-                    <strong>{order.order_number}</strong> - {shopsById[order.shop_id]?.shop_name || order.shop_id}
-                  </p>
-                  <StatusBadge label="Ready" tone="ready" />
+                  <div className="inline-list-row">
+                    <p>
+                      <strong>{order.order_number}</strong> - {shopsById[order.shop_id]?.shop_name || order.shop_id}
+                    </p>
+                    <StatusBadge label="Ready" tone="ready" />
+                  </div>
+                  <button
+                    type="button"
+                    className="button success small"
+                    onClick={() => handleMarkOrderDelivered(order.order_id)}
+                    disabled={busyAction === `deliver:${order.order_id}`}
+                  >
+                    {busyAction === `deliver:${order.order_id}`
+                      ? "Delivering..."
+                      : "Mark as Delivered"}
+                  </button>
                 </div>
               ))}
               {!trackSummary.ready.length ? <p className="muted">No ready orders.</p> : null}
@@ -2967,7 +3205,7 @@ export function AdminApp({
           </div>
         </section>
       ) : null}
-      {tab === "settings" ? (
+      {tab === "settings" && settingsTab === "system" ? (
         <section className="panel">
           <h2>System Settings</h2>
           <div className="panel inset">

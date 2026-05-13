@@ -62,6 +62,8 @@ export const ORDER_STATUS_META = {
 export const PIECE_STATUS_META = {
   not_assigned: { label: "Pending", tone: "pending" },
   assigned: { label: "Assigned", tone: "in-progress" },
+  pending_approval: { label: "Pending Approval", tone: "pending" },
+  approved: { label: "Approved", tone: "ready" },
   complete: { label: "Complete", tone: "ready" }
 };
 

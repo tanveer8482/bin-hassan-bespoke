@@ -1,6 +1,6 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-import { formatCurrency, formatDate } from "./format";
+import { formatCurrency, formatDate, number } from "./format";
 
 const APP_NAME = "Bin Hassan Bespoke";
 
@@ -23,6 +23,45 @@ function addReportHeader(doc, title, subtitle) {
   
   doc.setDrawColor(200);
   doc.line(14, 42, 196, 42);
+}
+
+function isApprovedWork(piece) {
+  const status = String(piece?.karigar_status || "").trim().toLowerCase();
+  return status === "complete" || status === "approved";
+}
+
+function resolveOrderFromRef(orderRef, orderId) {
+  if (!orderRef || !orderId) return null;
+  if (Array.isArray(orderRef)) {
+    return orderRef.find((order) => order.order_id === orderId) || null;
+  }
+  return orderRef[orderId] || null;
+}
+
+function karigarPieceAmount(piece) {
+  const baseAmount = number(piece?.karigar_rate);
+  const designingAmount = number(piece?.designing_karigar_charge);
+  const cuttingAmount = number(piece?.cutting_credit_amount);
+  return baseAmount + designingAmount || cuttingAmount;
+}
+
+function productNamesForOrder(order, orderItems) {
+  const items = orderItems.filter((item) => item.order_id === order.order_id);
+  const names = items
+    .map((item) => item.piece_type || item.product_name || item.product_id)
+    .filter(Boolean);
+  return names.length ? [...new Set(names)].join(", ") : order.product_name || "-";
+}
+
+function orderPrice(order, orderItems, orderTotals) {
+  const computed = orderTotals?.[order.order_id]?.grand_total;
+  if (computed !== undefined && computed !== null && computed !== "") return number(computed);
+
+  const itemTotal = orderItems
+    .filter((item) => item.order_id === order.order_id)
+    .reduce((sum, item) => sum + number(item.item_rate), 0);
+
+  return itemTotal || number(order.total_amount);
 }
 
 /**
@@ -64,73 +103,47 @@ export function generateMasterPayrollPdf(syncedPieces, totalAmount) {
 /**
  * Karigar Ledger Report
  */
-export function generateKarigarLedgerPdf(karigar, pieces, payments, summary) {
+export function generateKarigarLedgerPdf(karigar, pieces = [], payments = [], summary = {}, ordersById = {}) {
   console.log("[PDF] Starting Karigar Ledger PDF generation", { karigar: karigar?.name, pieceCount: pieces?.length });
   try {
     const doc = new jsPDF();
     const dateStr = formatDate(new Date());
+    const workerName = karigar?.name || karigar?.display_name || "Worker";
     
     addReportHeader(
       doc, 
-      `Worker Ledger: ${karigar.name}`, 
-      `Generated on: ${dateStr} | Contact: ${karigar.contact}`
+      `Karigar Invoice: ${workerName}`,
+      `Generated on: ${dateStr} | Contact: ${karigar?.contact || "-"}`
     );
-    
-    // Summary Section
-    doc.setFontSize(12);
-    doc.setTextColor(0);
-    doc.text("Financial Summary", 14, 52);
-    
+
+    const approvedPieces = pieces.filter(isApprovedWork);
+    const totalPayable = approvedPieces.reduce(
+      (sum, piece) => sum + karigarPieceAmount(piece),
+      0
+    );
+    const pieceData = approvedPieces.map((piece) => {
+      const order = resolveOrderFromRef(ordersById, piece.order_id);
+      return [
+        order?.order_number || piece.order_number || piece.order_id || "-",
+        piece.piece_name || piece.sub_product_name || "-",
+        formatCurrency(karigarPieceAmount(piece))
+      ];
+    });
+
     autoTable(doc, {
-      startY: 55,
-      body: [
-        ["Total Earned:", formatCurrency(summary.earned)],
-        ["Total Paid:", formatCurrency(summary.paid)],
-        ["Pending Balance:", formatCurrency(summary.balance)]
-      ],
-      theme: "plain",
-      styles: { cellPadding: 1, fontSize: 10 },
-      columnStyles: { 0: { fontStyle: "bold", cellWidth: 40 } }
+      startY: 50,
+      head: [["Order Number", "Piece Type", "Payment Amount"]],
+      body: pieceData.length ? pieceData : [["-", "No approved work", formatCurrency(0)]],
+      foot: [["", "Total Payable", formatCurrency(totalPayable)]],
+      theme: "grid",
+      headStyles: { fillColor: [40, 44, 52] },
+      footStyles: { fillColor: [245, 247, 250], textColor: [15, 23, 42], fontStyle: "bold" },
+      styles: { fontSize: 10, cellPadding: 3 }
     });
     
-    // Pieces Section
-    doc.setFontSize(12);
-    doc.text("Completed Work History", 14, doc.lastAutoTable.finalY + 10);
-    
-    const pieceData = pieces
-      .filter(p => p.karigar_status === "complete")
-      .map(p => [
-        formatDate(p.karigar_complete_date || p.updated_date),
-        p.piece_name,
-        p.item_type,
-        formatCurrency(p.karigar_rate || 0)
-      ]);
-      
-    autoTable(doc, {
-      startY: doc.lastAutoTable.finalY + 15,
-      head: [["Date", "Piece", "Type", "Rate"]],
-      body: pieceData,
-    });
-    
-    // Payments Section
-    doc.setFontSize(12);
-    doc.text("Payment History", 14, doc.lastAutoTable.finalY + 10);
-    
-    const paymentData = payments.map(p => [
-      formatDate(p.payment_date),
-      formatCurrency(p.amount),
-      p.note || "-"
-    ]);
-    
-    autoTable(doc, {
-      startY: doc.lastAutoTable.finalY + 15,
-      head: [["Date", "Amount", "Note"]],
-      body: paymentData,
-    });
-    
-    const safeKarigarName = (karigar?.name || "Worker").replace(/\s+/g, "_");
+    const safeKarigarName = workerName.replace(/\s+/g, "_");
     const safeDate = (dateStr || "unknown").replace(/\//g, "-");
-    doc.save(`Ledger_${safeKarigarName}_${safeDate}.pdf`);
+    doc.save(`Karigar_Invoice_${safeKarigarName}_${safeDate}.pdf`);
     console.log("[PDF] Karigar Ledger PDF saved successfully");
   } catch (error) {
     console.error("[PDF] Failed to generate Karigar Ledger PDF:", error);
@@ -140,70 +153,57 @@ export function generateKarigarLedgerPdf(karigar, pieces, payments, summary) {
 /**
  * Shop Ledger Report
  */
-export function generateShopLedgerPdf(shop, orders, payments, summary) {
+export function generateShopLedgerPdf(
+  shop,
+  orders = [],
+  payments = [],
+  summary = {},
+  orderItems = [],
+  orderTotals = {}
+) {
   console.log("[PDF] Starting Shop Ledger PDF generation", { shop: shop?.shop_name, orderCount: orders?.length });
   try {
     const doc = new jsPDF();
     const dateStr = formatDate(new Date());
+    const shopName = shop?.shop_name || shop?.display_name || "Shop";
     
     addReportHeader(
       doc, 
-      `Shop Ledger: ${shop.shop_name}`, 
-      `Generated on: ${dateStr} | Contact: ${shop.contact}`
+      `Shop Invoice: ${shopName}`,
+      `Generated on: ${dateStr} | Contact: ${shop?.contact || "-"}`
     );
-    
-    // Summary
-    doc.setFontSize(12);
-    doc.text("Account Summary", 14, 52);
-    
+
+    const orderRows = orders.map((order) => {
+      const price = orderPrice(order, orderItems, orderTotals);
+      return [
+        order.order_number || "-",
+        productNamesForOrder(order, orderItems),
+        formatCurrency(price)
+      ];
+    });
+    const fallbackTotal = orders.reduce(
+      (sum, order) => sum + orderPrice(order, orderItems, orderTotals),
+      0
+    );
+    const outstandingTotal =
+      summary?.balance !== undefined && summary?.balance !== null
+        ? number(summary.balance)
+        : fallbackTotal;
+
     autoTable(doc, {
-      startY: 55,
-      body: [
-        ["Total Billed:", formatCurrency(summary.billed)],
-        ["Total Paid:", formatCurrency(summary.paid)],
-        ["Current Balance:", formatCurrency(summary.balance)]
-      ],
-      theme: "plain",
-      styles: { cellPadding: 1 },
-      columnStyles: { 0: { fontStyle: "bold", cellWidth: 40 } }
+      startY: 50,
+      head: [["Order Number", "Product Name", "Price"]],
+      body: orderRows.length ? orderRows : [["-", "No orders", formatCurrency(0)]],
+      foot: [["", "Total Outstanding Bill", formatCurrency(outstandingTotal)]],
+      theme: "grid",
+      headStyles: { fillColor: [40, 44, 52] },
+      footStyles: { fillColor: [245, 247, 250], textColor: [15, 23, 42], fontStyle: "bold" },
+      styles: { fontSize: 10, cellPadding: 3 }
     });
     
-    // Orders
-    doc.setFontSize(12);
-    doc.text("Order History", 14, doc.lastAutoTable.finalY + 10);
-    
-    const orderData = orders.map(o => [
-      formatDate(o.delivery_date),
-      o.order_number,
-      o.status,
-      formatCurrency(o.total_amount || 0)
-    ]);
-    
-    autoTable(doc, {
-      startY: doc.lastAutoTable.finalY + 15,
-      head: [["Deliv. Date", "Order #", "Status", "Amount"]],
-      body: orderData,
-    });
-    
-    // Payments
-    doc.setFontSize(12);
-    doc.text("Payment History", 14, doc.lastAutoTable.finalY + 10);
-    
-    const paymentData = payments.map(p => [
-      formatDate(p.payment_date),
-      formatCurrency(p.amount),
-      p.note || "-"
-    ]);
-    
-    autoTable(doc, {
-      startY: doc.lastAutoTable.finalY + 15,
-      head: [["Date", "Amount", "Note"]],
-      body: paymentData,
-    });
-    
-    const safeShopName = (shop?.shop_name || "Shop").replace(/\s+/g, "_");
+    const safeShopName = shopName.replace(/\s+/g, "_");
     const safeDate = (dateStr || "unknown").replace(/\//g, "-");
-    doc.save(`Report_${safeShopName}_${safeDate}.pdf`);
+    doc.save(`Shop_Invoice_${safeShopName}_${safeDate}.pdf`);
     console.log("[PDF] Shop Ledger PDF saved successfully");
   } catch (error) {
     console.error("[PDF] Failed to generate Shop Ledger PDF:", error);

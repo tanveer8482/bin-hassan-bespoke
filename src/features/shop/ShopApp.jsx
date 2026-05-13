@@ -206,7 +206,14 @@ export function ShopApp({ user, data }) {
               className="button primary"
               onClick={() => {
                 console.log("[SHOP_REPORT_CLICK]", { user, orderCount: orders.length });
-                generateShopLedgerPdf(user, orders, data.paymentsShops, financial);
+                generateShopLedgerPdf(
+                  user,
+                  orders,
+                  data.paymentsShops,
+                  financial,
+                  data.orderItems,
+                  data.computed?.orderTotals || {}
+                );
               }}
             >
               Download My Report (PDF)
