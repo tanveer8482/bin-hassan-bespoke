@@ -154,6 +154,52 @@ function assertUniqueField(records, field, value, ignoreField = "", ignoreValue 
   }
 }
 
+function normalizeRoleValue(value) {
+  return normalizeKey(value).replace(/[\s-]+/g, "_");
+}
+
+function normalizeRoleList(value) {
+  if (Array.isArray(value)) {
+    return [...new Set(value.map(normalizeRoleValue).filter(Boolean))];
+  }
+
+  return [
+    ...new Set(
+      String(value || "")
+        .split(/[,|;]/)
+        .map(normalizeRoleValue)
+        .filter(Boolean)
+    )
+  ];
+}
+
+function inferWorkerRole(pieceName = "") {
+  const key = normalizeRoleValue(pieceName);
+  if (key.includes("waistcoat")) return "waistcoat_maker";
+  if (key.includes("coat")) return "coat_maker";
+  if (key.includes("pent") || key.includes("pant")) return "pent_maker";
+  return "";
+}
+
+function karigarHasRole(karigar, requiredRole) {
+  if (!requiredRole) return true;
+  const roles = new Set([
+    ...normalizeRoleList(karigar?.role),
+    ...normalizeRoleList(karigar?.skills)
+  ]);
+  return roles.has(requiredRole);
+}
+
+function assertKarigarRole(karigar, requiredRole, pieceName) {
+  if (karigarHasRole(karigar, requiredRole)) return;
+
+  const error = new Error(
+    `${karigar?.name || "Selected karigar"} is not eligible for ${pieceName || "this work"}`
+  );
+  error.statusCode = 400;
+  throw error;
+}
+
 // ============ ME & SNAPSHOT ============
 
 async function handleMe(req, res) {
@@ -284,13 +330,14 @@ async function extractOrder(req, res) {
         item_type: item.item_type,
         cutting_done: "FALSE",
         karigar_status: STATUS.KARIGAR.NOT_ASSIGNED,
+        assigned_role: normalizeRoleValue(sub.required_skill || "") || inferWorkerRole(sub.sub_product_name),
         measurement_photo_url: item.measurement_photo_url,
         reference_slip_url: order.slip_photo_url,
         cutting_credit_amount: toNumber(product?.cutting_rate || 0),
         shop_rate: fallbackShopRate,
         karigar_rate: toNumber(sub.worker_rate),
         is_synced: "FALSE",
-        bundle_piece_type: product.product_name || item.piece_type,
+        bundle_piece_type: product?.product_name || item.piece_type,
         created_date: now,
         updated_date: now
       });
@@ -304,13 +351,34 @@ async function extractOrder(req, res) {
 
 async function markPieceCut(req, res) {
   const user = requireAuth(req);
-  requireRole(user, [ROLES.ADMIN, ROLES.CUTTING]);
+  requireRole(user, [ROLES.ADMIN, ROLES.CUTTING, ROLES.KARIGAR]);
   await ensureWorkbook();
   const body = await parseBody(req);
   requireFields(body, ["piece_id"]);
+  const {
+    [SHEETS.PIECES]: pieces,
+    [SHEETS.KARIGAR]: karigars
+  } = await getManyRecords([SHEETS.PIECES, SHEETS.KARIGAR]);
+
+  let cuttingBy = user.username;
+  if (user.role === ROLES.KARIGAR) {
+    const worker = karigars.find((entry) => entry.karigar_id === user.entity_id);
+    assertKarigarRole(worker, "cutting_master", "cutting");
+    cuttingBy = user.entity_id;
+  } else if (body.cutting_karigar_id) {
+    const worker = karigars.find((entry) => entry.karigar_id === body.cutting_karigar_id);
+    if (!worker) {
+      const error = new Error("Cutting master not found");
+      error.statusCode = 404;
+      throw error;
+    }
+    assertKarigarRole(worker, "cutting_master", "cutting");
+    cuttingBy = worker.karigar_id;
+  }
+
   const updates = {
     cutting_done: "TRUE",
-    cutting_by: user.username,
+    cutting_by: cuttingBy,
     cutting_date: nowISO(),
     updated_date: nowISO()
   };
@@ -318,7 +386,6 @@ async function markPieceCut(req, res) {
     const res = await resolvePhotoInput({ photoDataUrl: body.photo_data_url, folder: "cutting" });
     updates.cutting_photo_url = res.photoUrl;
   }
-  const pieces = await getRecords(SHEETS.PIECES);
   const target = pieces.find((piece) => piece.piece_id === body.piece_id);
   if (!target) {
     const error = new Error("Piece not found");
@@ -347,7 +414,35 @@ async function assignPiece(req, res) {
   await ensureWorkbook();
   const body = await parseBody(req);
   requireFields(body, ["piece_id", "karigar_id"]);
-  const updates = { assigned_karigar_id: body.karigar_id, assigned_date: nowISO(), karigar_status: STATUS.KARIGAR.ASSIGNED, designing_karigar_charge: toNumber(body.designing_karigar_charge || 0) };
+  const {
+    [SHEETS.PIECES]: pieces,
+    [SHEETS.KARIGAR]: karigars
+  } = await getManyRecords([SHEETS.PIECES, SHEETS.KARIGAR]);
+  const piece = pieces.find((entry) => entry.piece_id === body.piece_id);
+  if (!piece) {
+    const error = new Error("Piece not found");
+    error.statusCode = 404;
+    throw error;
+  }
+  const karigar = karigars.find((entry) => entry.karigar_id === body.karigar_id);
+  if (!karigar) {
+    const error = new Error("Karigar not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const requiredRole =
+    normalizeRoleValue(piece.assigned_role || piece.required_skill || "") ||
+    inferWorkerRole(piece.piece_name);
+  assertKarigarRole(karigar, requiredRole, piece.piece_name);
+
+  const updates = {
+    assigned_karigar_id: body.karigar_id,
+    assigned_role: requiredRole,
+    assigned_date: nowISO(),
+    karigar_status: STATUS.KARIGAR.ASSIGNED,
+    designing_karigar_charge: toNumber(body.designing_karigar_charge || 0)
+  };
   await updateByField(SHEETS.PIECES, "piece_id", body.piece_id, updates);
   sendOk(res, { message: "Work assigned" });
 }
@@ -381,15 +476,61 @@ async function syncPayroll(req, res) {
   requireRole(req, [ROLES.ADMIN]);
   await ensureWorkbook();
   const syncId = id("sync");
-  const pieces = await getRecords(SHEETS.PIECES);
-  const toSync = pieces.filter(p => normalizeKey(p.karigar_status) === STATUS.KARIGAR.COMPLETE && normalizeKey(p.is_synced) !== "true");
-  if (!toSync.length) return sendOk(res, { message: "No pieces to sync" });
-  const updates = toSync.map(p => ({ rowNumber: p.__rowNumber, record: { ...p, is_synced: "TRUE", sync_id: syncId, updated_date: nowISO() } }));
+  const {
+    [SHEETS.PIECES]: pieces,
+    [SHEETS.KARIGAR]: karigars
+  } = await getManyRecords([SHEETS.PIECES, SHEETS.KARIGAR]);
+  const karigarIds = new Set(karigars.map((karigar) => karigar.karigar_id));
+  const completedWork = pieces.filter(
+    (p) =>
+      normalizeKey(p.karigar_status) === STATUS.KARIGAR.COMPLETE &&
+      normalizeKey(p.is_synced) !== "true"
+  );
+  const cuttingWork = pieces.filter(
+    (p) =>
+      parseBoolean(p.cutting_done) &&
+      karigarIds.has(p.cutting_by) &&
+      normalizeKey(p.cutting_credit_synced) !== "true"
+  );
+
+  if (!completedWork.length && !cuttingWork.length) {
+    return sendOk(res, { message: "No pieces to sync" });
+  }
+
+  const updatesByPieceId = new Map();
+  completedWork.forEach((piece) => {
+    updatesByPieceId.set(piece.piece_id, {
+      rowNumber: piece.__rowNumber,
+      record: { ...piece, is_synced: "TRUE", sync_id: syncId, updated_date: nowISO() }
+    });
+  });
+  cuttingWork.forEach((piece) => {
+    const existing = updatesByPieceId.get(piece.piece_id);
+    const baseRecord = existing?.record || piece;
+    updatesByPieceId.set(piece.piece_id, {
+      rowNumber: piece.__rowNumber,
+      record: {
+        ...baseRecord,
+        cutting_credit_synced: "TRUE",
+        sync_id: syncId,
+        updated_date: nowISO()
+      }
+    });
+  });
+
+  const updates = Array.from(updatesByPieceId.values());
   await updateMany(SHEETS.PIECES, updates);
+  const cuttingCredits = cuttingWork.map((piece) => ({
+    ...piece,
+    assigned_karigar_id: piece.cutting_by,
+    piece_name: `Cutting: ${piece.bundle_piece_type || piece.piece_name}`,
+    karigar_rate: toNumber(piece.cutting_credit_amount),
+    designing_karigar_charge: 0
+  }));
   sendOk(res, { 
-    message: `${toSync.length} pieces synced`, 
+    message: `${completedWork.length + cuttingWork.length} work credits synced`,
     sync_id: syncId,
-    syncedPieces: toSync
+    syncedPieces: [...completedWork, ...cuttingCredits]
   });
 }
 
@@ -438,7 +579,16 @@ async function handleProductSubProducts(req, res) {
   requireRole(user, [ROLES.ADMIN]);
   const body = await parseBody(req);
   if (req.method === "POST") {
-    const record = { sub_id: id("sub"), product_id: body.product_id, sub_product_name: normalizeText(body.sub_product_name), worker_rate: toNumber(body.worker_rate) };
+    const subProductName = normalizeText(body.sub_product_name);
+    const requiredSkill =
+      normalizeRoleValue(body.required_skill || "") || inferWorkerRole(subProductName);
+    const record = {
+      sub_id: id("sub"),
+      product_id: body.product_id,
+      sub_product_name: subProductName,
+      worker_rate: toNumber(body.worker_rate),
+      required_skill: requiredSkill
+    };
     await appendRecord(SHEETS.PRODUCT_SUB_PRODUCTS, record);
     return sendOk(res, { message: "Sub-product saved", record });
   }
@@ -629,11 +779,13 @@ async function handleKarigar(req, res) {
     assertUniqueUsername(users, username);
 
     const karigarId = id("karigar");
+    const role = normalizeRoleList(body.role || body.roles || body.skills).join(",");
     const record = {
       karigar_id: karigarId,
       name: karigarName,
       contact: normalizeText(body.contact || ""),
-      skills: normalizeText(body.skills || ""),
+      role,
+      skills: normalizeText(body.skills || role),
       is_active: "TRUE",
       created_date: now,
       updated_date: now
@@ -725,14 +877,19 @@ async function handleKarigar(req, res) {
   const nextKarigarName = normalizeText(body.name || existingKarigar.name);
   const nextContact =
     body.contact === undefined ? existingKarigar.contact || "" : normalizeText(body.contact);
+  const nextRole =
+    body.role === undefined
+      ? existingKarigar.role || existingKarigar.skills || ""
+      : normalizeRoleList(body.role).join(",");
   const nextSkills =
-    body.skills === undefined ? existingKarigar.skills || "" : normalizeText(body.skills);
+    body.skills === undefined ? existingKarigar.skills || nextRole : normalizeText(body.skills);
 
   assertUniqueField(karigars, "name", nextKarigarName, "karigar_id", body.karigar_id);
 
   const updated = await updateByField(SHEETS.KARIGAR, "karigar_id", body.karigar_id, {
     name: nextKarigarName,
     contact: nextContact,
+    role: nextRole,
     skills: nextSkills,
     updated_date: nowISO()
   });

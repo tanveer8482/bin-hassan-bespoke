@@ -5,6 +5,7 @@ import {
   byId,
   formatCurrency,
   formatDate,
+  normalizeBool,
   number,
   PIECE_STATUS_META
 } from "../../lib/format";
@@ -15,10 +16,33 @@ function pieceBadge(status) {
   return PIECE_STATUS_META[status] || { label: status, tone: "pending" };
 }
 
-export function KarigarApp({ user, data, onCompletePiece, busyAction }) {
+function normalizeRoleValue(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+}
+
+function getRoleValues(value) {
+  return [
+    ...new Set(
+      String(value || "")
+        .split(/[,|;]/)
+        .map(normalizeRoleValue)
+        .filter(Boolean)
+    )
+  ];
+}
+
+function hasRole(worker, role) {
+  return new Set([...getRoleValues(worker?.role), ...getRoleValues(worker?.skills)]).has(role);
+}
+
+export function KarigarApp({ user, data, onCompletePiece, onMarkPieceCut, busyAction }) {
   const [tab, setTab] = useState("work");
   const [filter, setFilter] = useState("pending");
   const [searchQuery, setSearchQuery] = useState("");
+  const [cuttingSearchQuery, setCuttingSearchQuery] = useState("");
   const [uploadError, setUploadError] = useState("");
 
   const shops = Array.isArray(data?.shops) ? data.shops : [];
@@ -30,6 +54,10 @@ export function KarigarApp({ user, data, onCompletePiece, busyAction }) {
 
   const shopsById = useMemo(() => byId(shops, "shop_id"), [shops]);
   const ordersById = useMemo(() => byId(orders, "order_id"), [orders]);
+  const currentKarigar = (data.karigars || []).find(
+    (karigar) => karigar.karigar_id === user.entity_id
+  );
+  const canHandleCutting = hasRole(currentKarigar, "cutting_master");
 
   const pieces = useMemo(() => {
     const sorted = [...visiblePieces].sort((a, b) => {
@@ -61,9 +89,69 @@ export function KarigarApp({ user, data, onCompletePiece, busyAction }) {
 
   const paymentSummary = data.computed?.karigarFinancials?.[user.entity_id] || {
     earned: 0,
+    pending: 0,
     paid: 0,
     balance: 0
   };
+
+  const cuttingPieces = useMemo(() => {
+    if (!canHandleCutting || !Array.isArray(data?.pieces)) return [];
+    const rawPending = data.pieces.filter((piece) => !normalizeBool(piece.cutting_done));
+    const grouped = new Map();
+
+    rawPending.forEach((piece) => {
+      const key = piece.item_id || piece.piece_id;
+      if (!grouped.has(key)) {
+        grouped.set(key, {
+          ...piece,
+          _pendingCount: 0
+        });
+      }
+      const entry = grouped.get(key);
+      entry._pendingCount += 1;
+      if (!entry.reference_slip_url && piece.reference_slip_url) {
+        entry.reference_slip_url = piece.reference_slip_url;
+      }
+    });
+
+    return Array.from(grouped.values());
+  }, [canHandleCutting, data?.pieces]);
+
+  const cuttingLedgerPieces = useMemo(() => {
+    if (!canHandleCutting || !Array.isArray(data?.pieces)) return [];
+    return data.pieces
+      .filter((piece) => piece.cutting_by === user.entity_id)
+      .map((piece) => ({
+        ...piece,
+        assigned_karigar_id: user.entity_id,
+        piece_name: `Cutting: ${piece.bundle_piece_type || piece.piece_name}`,
+        karigar_rate: piece.cutting_credit_amount,
+        karigar_status: normalizeBool(piece.cutting_done) ? "complete" : "assigned"
+      }));
+  }, [canHandleCutting, data?.pieces, user.entity_id]);
+
+  const ledgerPieces = useMemo(() => {
+    const cuttingIds = new Set(cuttingLedgerPieces.map((piece) => `${piece.piece_id}:cutting`));
+    const cuttingRows = cuttingLedgerPieces.map((piece) => ({
+      ...piece,
+      piece_id: `${piece.piece_id}:cutting`
+    }));
+    return [
+      ...visiblePieces.filter((piece) => !cuttingIds.has(piece.piece_id)),
+      ...cuttingRows
+    ];
+  }, [visiblePieces, cuttingLedgerPieces]);
+
+  const filteredCuttingPieces = useMemo(() => {
+    if (!cuttingSearchQuery.trim()) return cuttingPieces;
+    const query = cuttingSearchQuery.toLowerCase();
+    return cuttingPieces.filter((piece) => {
+      const order = ordersById[piece.order_id];
+      const orderNumber = order?.order_number?.toString().toLowerCase() || "";
+      const shopName = shopsById[order?.shop_id]?.shop_name?.toLowerCase() || "";
+      return orderNumber.includes(query) || shopName.includes(query);
+    });
+  }, [cuttingPieces, cuttingSearchQuery, ordersById, shopsById]);
 
   const submitCompletionPhoto = async (pieceId, file) => {
     if (!file) return;
@@ -96,6 +184,37 @@ export function KarigarApp({ user, data, onCompletePiece, busyAction }) {
     }
   };
 
+  const submitCuttingPhoto = async (pieceId, file) => {
+    if (!file) return;
+
+    setUploadError("");
+
+    try {
+      const { payload, meta } = await preparePhotoPayloadForApi(file, {
+        folder: "bin-hassan-bespoke/cutting"
+      });
+
+      console.log(
+        "[CUTTING_MASTER_UPLOAD]",
+        JSON.stringify({
+          pieceId,
+          uploadMode: meta.uploadMode,
+          compressedBytes: meta.compressedBytes
+        })
+      );
+
+      await onMarkPieceCut({
+        piece_id: pieceId,
+        ...payload
+      });
+    } catch (error) {
+      if (/too large/i.test(error.message || "")) {
+        window.alert(error.message);
+      }
+      setUploadError(error.message || "Upload failed");
+    }
+  };
+
   return (
     <div className="role-shell">
       <div className="tab-row">
@@ -105,6 +224,14 @@ export function KarigarApp({ user, data, onCompletePiece, busyAction }) {
         >
           My Work
         </button>
+        {canHandleCutting ? (
+          <button
+            className={tab === "cutting" ? "tab-button active" : "tab-button"}
+            onClick={() => setTab("cutting")}
+          >
+            Cutting Queue
+          </button>
+        ) : null}
         <button
           className={tab === "payments" ? "tab-button active" : "tab-button"}
           onClick={() => setTab("payments")}
@@ -238,6 +365,105 @@ export function KarigarApp({ user, data, onCompletePiece, busyAction }) {
             ) : null}
           </div>
         </section>
+      ) : tab === "cutting" && canHandleCutting ? (
+        <section className="panel">
+          <div className="panel-head">
+            <div>
+              <h2>Cutting Queue</h2>
+            </div>
+            <SearchBar
+              value={cuttingSearchQuery}
+              onChange={setCuttingSearchQuery}
+              placeholder="Search order or shop..."
+            />
+          </div>
+
+          {uploadError ? <div className="alert error">{uploadError}</div> : null}
+
+          <div className="cards-grid">
+            {filteredCuttingPieces.map((piece) => {
+              const order = ordersById[piece.order_id] || {};
+              const shop = shopsById[order.shop_id] || {};
+              const displayName = piece.bundle_piece_type || piece.piece_name;
+
+              return (
+                <article className="card" key={piece.piece_id}>
+                  <div>
+                    <p className="muted">Order #{order.order_number || "-"}</p>
+                    <h3>{displayName}</h3>
+                    <p className="muted">
+                      {piece.item_type} | {shop.shop_name || order.shop_id || "-"}
+                    </p>
+                    {piece._pendingCount > 1 ? (
+                      <p className="muted">Includes {piece._pendingCount} sub-products</p>
+                    ) : null}
+                    <p className="muted">Cutting Rate: {formatCurrency(piece.cutting_credit_amount)}</p>
+                    <p className="muted">Delivery: {formatDate(order.delivery_date)}</p>
+                  </div>
+
+                  {piece.reference_slip_url ? (
+                    <a href={piece.reference_slip_url} target="_blank" rel="noreferrer">
+                      <img
+                        src={piece.reference_slip_url}
+                        alt="Reference slip"
+                        className="slip-thumb"
+                      />
+                    </a>
+                  ) : (
+                    <p className="muted">Reference slip not available</p>
+                  )}
+
+                  <div className="button-group-vertical">
+                    {piece.reference_slip_url ? (
+                      <>
+                        <label className="file-upload">
+                          <input
+                            type="file"
+                            accept="image/*"
+                            capture="environment"
+                            onChange={(event) =>
+                              submitCuttingPhoto(piece.piece_id, event.target.files?.[0])
+                            }
+                            disabled={busyAction === `cut:${piece.piece_id}`}
+                          />
+                          <span>
+                            {busyAction === `cut:${piece.piece_id}`
+                              ? "Uploading..."
+                              : "Upload Cutting Photo"}
+                          </span>
+                        </label>
+
+                        <button
+                          className="button secondary small"
+                          onClick={() => onMarkPieceCut({ piece_id: piece.piece_id })}
+                          disabled={busyAction === `cut:${piece.piece_id}`}
+                          style={{ marginTop: "0.5rem" }}
+                        >
+                          Mark Cut (No Photo)
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        className="button primary small"
+                        onClick={() => onMarkPieceCut({ piece_id: piece.piece_id })}
+                        disabled={busyAction === `cut:${piece.piece_id}`}
+                      >
+                        Mark Cut
+                      </button>
+                    )}
+                  </div>
+                </article>
+              );
+            })}
+            {!filteredCuttingPieces.length ? (
+              <p className="muted">
+                {cuttingSearchQuery
+                  ? "No cutting work found matching your search."
+                  : "No pending cutting pieces right now."}
+              </p>
+            ) : null}
+          </div>
+        </section>
       ) : tab === "payments" ? (
         <section className="panel">
           <h2>Payment Summary</h2>
@@ -293,8 +519,8 @@ export function KarigarApp({ user, data, onCompletePiece, busyAction }) {
             <button 
               className="button primary"
               onClick={() => {
-                console.log("[KARIGAR_LEDGER_CLICK]", { user, pieceCount: visiblePieces.length });
-                generateKarigarLedgerPdf(user, visiblePieces, paymentsKarigar, paymentSummary);
+                console.log("[KARIGAR_LEDGER_CLICK]", { user, pieceCount: ledgerPieces.length });
+                generateKarigarLedgerPdf(user, ledgerPieces, paymentsKarigar, paymentSummary);
               }}
             >
               Download My Ledger (PDF)

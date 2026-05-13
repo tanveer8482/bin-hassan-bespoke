@@ -72,7 +72,7 @@ const BUNDLE_PIECE_TYPES = ["suit_2piece", "suit_3piece"];
 const REQUIRED_HEADERS = {
   [SHEETS.USERS]: ["username", "password", "role", "display_name", "entity_id"],
   [SHEETS.SHOPS]: ["shop_id", "shop_name", "contact", "created_date"],
-  [SHEETS.KARIGAR]: ["karigar_id", "name", "contact", "skills", "is_active", "created_date", "updated_date"],
+  [SHEETS.KARIGAR]: ["karigar_id", "name", "contact", "skills", "is_active", "created_date", "updated_date", "role"],
   [SHEETS.ORDERS]: [
     "order_id",
     "order_number",

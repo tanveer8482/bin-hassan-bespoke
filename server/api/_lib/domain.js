@@ -41,6 +41,29 @@ function pickRate(map, entityId, pieceName, itemType) {
   return 0;
 }
 
+function normalizeRoleValue(value) {
+  return normalizeKey(value).replace(/[\s-]+/g, "_");
+}
+
+function normalizeRoleList(value) {
+  return [
+    ...new Set(
+      String(value || "")
+        .split(/[,|;]/)
+        .map(normalizeRoleValue)
+        .filter(Boolean)
+    )
+  ];
+}
+
+function karigarHasRole(karigar, role) {
+  const roles = new Set([
+    ...normalizeRoleList(karigar?.role),
+    ...normalizeRoleList(karigar?.skills)
+  ]);
+  return roles.has(role);
+}
+
 function resolveShopItemRate(shopRateMap, shopId, pieceType, itemType) {
   const normalizedPieceType = normalizeKey(pieceType);
 
@@ -265,6 +288,15 @@ function computeKarigarFinancials(pieces, paymentsKarigar) {
     return map;
   }, {});
 
+  pieces.forEach((piece) => {
+    const karigarId = piece.cutting_by;
+    if (!karigarId || !parseBoolean(piece.cutting_done)) return;
+    if (!parseBoolean(piece.cutting_credit_synced)) return;
+
+    if (!earnedByKarigar[karigarId]) earnedByKarigar[karigarId] = 0;
+    earnedByKarigar[karigarId] += toNumber(piece.cutting_credit_amount);
+  });
+
   const pendingByKarigar = pieces.reduce((map, piece) => {
     const karigarId = piece.assigned_karigar_id;
     if (!karigarId) return map;
@@ -283,6 +315,15 @@ function computeKarigarFinancials(pieces, paymentsKarigar) {
       toNumber(piece.karigar_rate) + toNumber(piece.designing_karigar_charge);
     return map;
   }, {});
+
+  pieces.forEach((piece) => {
+    const karigarId = piece.cutting_by;
+    if (!karigarId || !parseBoolean(piece.cutting_done)) return;
+    if (parseBoolean(piece.cutting_credit_synced)) return;
+
+    if (!pendingByKarigar[karigarId]) pendingByKarigar[karigarId] = 0;
+    pendingByKarigar[karigarId] += toNumber(piece.cutting_credit_amount);
+  });
 
   const paidByKarigar = paymentsKarigar.reduce((map, payment) => {
     if (!map[payment.karigar_id]) map[payment.karigar_id] = 0;
@@ -436,9 +477,19 @@ function filterSnapshotByRole(user, snapshot) {
 
   if (user.role === ROLES.KARIGAR) {
     const karigarId = user.entity_id;
+    const currentKarigar = karigars.find((karigar) => karigar.karigar_id === karigarId);
+    const canHandleCutting = karigarHasRole(currentKarigar, "cutting_master");
 
-    const pieces = piecesAll.filter(
+    const assignedPieces = piecesAll.filter(
       (piece) => piece.assigned_karigar_id === karigarId
+    );
+    const cuttingPieces = canHandleCutting
+      ? piecesAll.filter(
+          (piece) => !parseBoolean(piece.cutting_done) || piece.cutting_by === karigarId
+        )
+      : [];
+    const pieces = Array.from(
+      new Map([...assignedPieces, ...cuttingPieces].map((piece) => [piece.piece_id, piece])).values()
     );
 
     const orderIds = new Set(pieces.map((piece) => piece.order_id));

@@ -854,6 +854,7 @@ export default function App() {
           user={user}
           data={data}
           onCompletePiece={(payload) => actions.completePiece(payload)}
+          onMarkPieceCut={(payload) => actions.markPieceCut(payload)}
           busyAction={busyAction}
         />
       ) : null}

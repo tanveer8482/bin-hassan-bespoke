@@ -17,10 +17,24 @@ import { generateMasterPayrollPdf } from "../../lib/pdfReport";
 
 const PIECE_TYPES = ["coat", "pent", "waistcoat", "suit_2piece", "suit_3piece"];
 const ITEM_TYPES = ["normal", "vip", "chapma"];
+const KARIGAR_ROLE_OPTIONS = [
+  { value: "coat_maker", label: "Coat Maker", pieces: ["coat"] },
+  { value: "pent_maker", label: "Pent Maker", pieces: ["pent"] },
+  { value: "waistcoat_maker", label: "Waistcoat Maker", pieces: ["waistcoat", "inner_waistcoat"] },
+  { value: "cutting_master", label: "Cutting Master", pieces: [] }
+];
+const ASSIGN_WORK_TABS = [
+  { key: "all", label: "All" },
+  { key: "coat", label: "Coat" },
+  { key: "pent", label: "Pent" },
+  { key: "waistcoat", label: "Waistcoat" }
+];
 
 export const TAB_LIST = [
   { key: "dashboard", label: "Dashboard" },
   { key: "orders", label: "Orders" },
+  { key: "shops", label: "Shops" },
+  { key: "karigar", label: "Karigars" },
   { key: "settings", label: "Settings" },
   { key: "cutting", label: "Cutting" },
   { key: "assign", label: "Assign Work" },
@@ -69,6 +83,56 @@ function orderBadge(status) {
 
 function pieceBadge(status) {
   return PIECE_STATUS_META[status] || { label: status, tone: "pending" };
+}
+
+function normalizeRoleValue(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+}
+
+function getRoleValues(value) {
+  return [
+    ...new Set(
+      String(value || "")
+        .split(/[,|;]/)
+        .map(normalizeRoleValue)
+        .filter(Boolean)
+    )
+  ];
+}
+
+function formatKarigarRoles(value) {
+  const labelsByValue = Object.fromEntries(
+    KARIGAR_ROLE_OPTIONS.map((entry) => [entry.value, entry.label])
+  );
+  const roles = getRoleValues(value);
+  return roles.length ? roles.map((role) => labelsByValue[role] || role).join(", ") : "-";
+}
+
+function getRequiredRoleForPiece(pieceName) {
+  const normalized = normalizeRoleValue(pieceName);
+  if (normalized.includes("waistcoat")) return "waistcoat_maker";
+  if (normalized.includes("coat")) return "coat_maker";
+  if (normalized.includes("pent") || normalized.includes("pant")) return "pent_maker";
+  return "";
+}
+
+function karigarHasRequiredRole(karigar, requiredRole) {
+  if (!requiredRole) return true;
+  const roles = new Set([
+    ...getRoleValues(karigar?.role),
+    ...getRoleValues(karigar?.skills)
+  ]);
+  return roles.has(requiredRole);
+}
+
+function pieceMatchesAssignTab(piece, activeTab) {
+  if (activeTab === "all") return true;
+  const normalized = normalizeRoleValue(piece.piece_name);
+  if (activeTab === "waistcoat") return normalized.includes("waistcoat");
+  return normalized.includes(activeTab);
 }
 
 function OrderListCard({
@@ -279,6 +343,10 @@ export function AdminApp({
   const [orderFilter, setOrderFilter] = useState({ status: "all", shop_id: "all" });
   const [dashboardFilter, setDashboardFilter] = useState("all");
   const [expandedOrderId, setExpandedOrderId] = useState("");
+  const [assignWorkTab, setAssignWorkTab] = useState("all");
+  const [selectedShopId, setSelectedShopId] = useState("");
+  const [selectedKarigarId, setSelectedKarigarId] = useState("");
+  const [cuttingDraft, setCuttingDraft] = useState({});
 
   const [assignDraft, setAssignDraft] = useState({});
 
@@ -296,11 +364,12 @@ export function AdminApp({
     rate: ""
   });
 
-  const [karigarForm, setKarigarForm] = useState({ name: "", contact: "", password: "" });
+  const [karigarForm, setKarigarForm] = useState({ name: "", contact: "", password: "", role: "" });
   const [karigarEditForm, setKarigarEditForm] = useState({
     karigar_id: "",
     name: "",
     contact: "",
+    role: "",
     password: ""
   });
   const [karigarRateForm, setKarigarRateForm] = useState({
@@ -347,6 +416,10 @@ export function AdminApp({
   }, [data.products, orderForm.shop_id, shopsById]);
 
   const karigarById = useMemo(() => byId(data.karigars, "karigar_id"), [data.karigars]);
+  const cuttingMasters = useMemo(
+    () => data.karigars.filter((karigar) => karigarHasRequiredRole(karigar, "cutting_master")),
+    [data.karigars]
+  );
   const karigarUsersByEntityId = useMemo(() => {
     return (data.users || []).reduce((map, entry) => {
       if (entry.role === "karigar" && entry.entity_id) {
@@ -357,6 +430,12 @@ export function AdminApp({
   }, [data.users]);
 
   const ordersById = useMemo(() => byId(data.orders, "order_id"), [data.orders]);
+  const selectedShop = data.shops.find(
+    (shop) => shop.shop_id === (selectedShopId || data.shops[0]?.shop_id)
+  );
+  const selectedKarigar = data.karigars.find(
+    (karigar) => karigar.karigar_id === (selectedKarigarId || data.karigars[0]?.karigar_id)
+  );
   const normalizedOrderSearchQuery = orderSearchQuery.trim().toLowerCase();
 
   const orderMatchesGlobalSearch = useCallback(
@@ -489,10 +568,20 @@ export function AdminApp({
   }, [data.pieces]);
 
   const filteredAssignablePieces = useMemo(() => {
-    return assignablePieces.filter((piece) =>
-      orderMatchesGlobalSearch(ordersById[piece.order_id])
+    return assignablePieces.filter(
+      (piece) =>
+        pieceMatchesAssignTab(piece, assignWorkTab) &&
+        orderMatchesGlobalSearch(ordersById[piece.order_id])
     );
-  }, [assignablePieces, orderMatchesGlobalSearch, ordersById]);
+  }, [assignablePieces, assignWorkTab, orderMatchesGlobalSearch, ordersById]);
+
+  const getEligibleKarigarsForPiece = useCallback(
+    (piece) => {
+      const requiredRole = normalizeRoleValue(piece?.assigned_role) || getRequiredRoleForPiece(piece?.piece_name);
+      return data.karigars.filter((karigar) => karigarHasRequiredRole(karigar, requiredRole));
+    },
+    [data.karigars]
+  );
 
   const dashboard = data.computed?.dashboard || {
     total_active_orders: 0,
@@ -605,6 +694,39 @@ export function AdminApp({
   const selectedTrackOrderId = trackOrderId || data.orders[0]?.order_id || "";
   const selectedTrackOrder = data.orders.find((order) => order.order_id === selectedTrackOrderId);
   const selectedTrackPieces = piecesByOrder[selectedTrackOrderId] || [];
+  const selectedShopOrders = selectedShop
+    ? data.orders.filter((order) => order.shop_id === selectedShop.shop_id)
+    : [];
+  const selectedShopPayments = selectedShop
+    ? data.paymentsShops.filter((payment) => payment.shop_id === selectedShop.shop_id)
+    : [];
+  const selectedShopFinancial = selectedShop
+    ? data.computed?.shopFinancials?.[selectedShop.shop_id] || { billed: 0, paid: 0, balance: 0 }
+    : { billed: 0, paid: 0, balance: 0 };
+  const selectedKarigarPieces = selectedKarigar
+    ? data.pieces.filter(
+        (piece) =>
+          piece.assigned_karigar_id === selectedKarigar.karigar_id ||
+          piece.cutting_by === selectedKarigar.karigar_id
+      )
+    : [];
+  const selectedKarigarPayments = selectedKarigar
+    ? data.paymentsKarigar.filter((payment) => payment.karigar_id === selectedKarigar.karigar_id)
+    : [];
+  const selectedKarigarFinancial = selectedKarigar
+    ? data.computed?.karigarFinancials?.[selectedKarigar.karigar_id] || {
+        earned: 0,
+        pending: 0,
+        paid: 0,
+        balance: 0
+      }
+    : { earned: 0, pending: 0, paid: 0, balance: 0 };
+  const selectedKarigarCompletedCount = selectedKarigarPieces.filter(
+    (piece) =>
+      piece.cutting_by === selectedKarigar?.karigar_id
+        ? normalizeBool(piece.cutting_done)
+        : piece.karigar_status === "complete" || piece.karigar_status === "pending_approval"
+  ).length;
 
   const submitOrder = async (event) => {
     event.preventDefault();
@@ -642,7 +764,10 @@ export function AdminApp({
       const result = await actions.syncPayroll();
       console.log("[ADMIN_SYNC_RESULT]", result);
       if (result?.syncedPieces?.length > 0) {
-        const total = result.syncedPieces.reduce((sum, p) => sum + (p.karigar_rate || 0), 0);
+        const total = result.syncedPieces.reduce(
+          (sum, p) => sum + number(p.karigar_rate || 0) + number(p.designing_karigar_charge || 0),
+          0
+        );
         generateMasterPayrollPdf(result.syncedPieces, total);
       }
     } finally {
@@ -687,6 +812,7 @@ export function AdminApp({
       );
       await actions.markPieceCut({
         piece_id: pieceId,
+        cutting_karigar_id: cuttingDraft[pieceId]?.karigar_id || cuttingMasters[0]?.karigar_id || "",
         ...payload
       });
     } catch (err) {
@@ -697,6 +823,14 @@ export function AdminApp({
       // Ignore local read errors; app-level error toast handles API issues.
     }
   };
+
+  const markCuttingPiece = async (pieceId) => {
+    await actions.markPieceCut({
+      piece_id: pieceId,
+      cutting_karigar_id: cuttingDraft[pieceId]?.karigar_id || cuttingMasters[0]?.karigar_id || ""
+    });
+  };
+
   const updateOrderStatus = async (orderId, status) => {
     if (!status || ordersById[orderId]?.status === status) return;
 
@@ -755,6 +889,23 @@ export function AdminApp({
       });
     }
   };
+
+  const toggleKarigarRole = (target, roleValue) => {
+    const setter = target === "edit" ? setKarigarEditForm : setKarigarForm;
+    setter((current) => {
+      const roles = new Set(getRoleValues(current.role));
+      if (roles.has(roleValue)) {
+        roles.delete(roleValue);
+      } else {
+        roles.add(roleValue);
+      }
+      return {
+        ...current,
+        role: Array.from(roles).join(",")
+      };
+    });
+  };
+
   const handleApprovePiece = async (pieceId) => {
     await actions.approvePiece({ piece_id: pieceId });
   };
@@ -815,15 +966,23 @@ export function AdminApp({
 
   const submitKarigar = async (event) => {
     event.preventDefault();
+    if (!getRoleValues(karigarForm.role).length) {
+      window.alert("Please select at least one role/specialty for this karigar.");
+      return;
+    }
     const ok = await actions.createKarigar(karigarForm);
-    if (ok) setKarigarForm({ name: "", contact: "", password: "" });
+    if (ok) setKarigarForm({ name: "", contact: "", password: "", role: "" });
   };
 
   const submitKarigarUpdate = async (event) => {
     event.preventDefault();
+    if (!getRoleValues(karigarEditForm.role).length) {
+      window.alert("Please select at least one role/specialty for this karigar.");
+      return;
+    }
     const ok = await actions.updateKarigar(karigarEditForm);
     if (ok) {
-      setKarigarEditForm({ karigar_id: "", name: "", contact: "", password: "" });
+      setKarigarEditForm({ karigar_id: "", name: "", contact: "", role: "", password: "" });
     }
   };
 
@@ -934,7 +1093,7 @@ export function AdminApp({
     if (!confirmed) return;
     const ok = await actions.deleteKarigar({ karigar_id: karigarEditForm.karigar_id });
     if (ok) {
-      setKarigarEditForm({ karigar_id: "", name: "", contact: "", password: "" });
+      setKarigarEditForm({ karigar_id: "", name: "", contact: "", role: "", password: "" });
     }
   };
 
@@ -1445,12 +1604,18 @@ export function AdminApp({
 
       {tab === "cutting" ? (
         <section className="panel">
-          <h2>Cutting Queue</h2>
+          <div className="panel-head">
+            <div>
+              <h2>Cutting Queue</h2>
+            </div>
+          </div>
 
           <div className="cards-grid">
             {pendingCutPieces.map((piece) => {
               const order = data.orders.find((entry) => entry.order_id === piece.order_id);
               const displayName = piece.bundle_piece_type || piece.piece_name;
+              const selectedCuttingMasterId =
+                cuttingDraft[piece.piece_id]?.karigar_id || cuttingMasters[0]?.karigar_id || "";
 
               return (
                 <article className="card" key={piece.piece_id}>
@@ -1469,6 +1634,29 @@ export function AdminApp({
                       <img src={piece.reference_slip_url} alt="Reference slip" className="slip-thumb" />
                     </a>
                   ) : null}
+                  <label>
+                    Cutting Master
+                    <select
+                      className="input"
+                      value={selectedCuttingMasterId}
+                      onChange={(event) =>
+                        setCuttingDraft((current) => ({
+                          ...current,
+                          [piece.piece_id]: {
+                            ...current[piece.piece_id],
+                            karigar_id: event.target.value
+                          }
+                        }))
+                      }
+                    >
+                      <option value="">Uncredited / legacy cutting</option>
+                      {cuttingMasters.map((karigar) => (
+                        <option key={karigar.karigar_id} value={karigar.karigar_id}>
+                          {karigar.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                   {piece.reference_slip_url ? (
                     <>
                       <label className="file-upload">
@@ -1485,7 +1673,7 @@ export function AdminApp({
                       </label>
                       <button
                         className="button secondary small"
-                        onClick={() => actions.markPieceCut({ piece_id: piece.piece_id })}
+                        onClick={() => markCuttingPiece(piece.piece_id)}
                         disabled={busyAction === `cut:${piece.piece_id}`}
                         style={{ marginTop: "0.5rem" }}
                       >
@@ -1495,7 +1683,7 @@ export function AdminApp({
                   ) : (
                     <button
                       className="button primary small"
-                      onClick={() => actions.markPieceCut({ piece_id: piece.piece_id })}
+                      onClick={() => markCuttingPiece(piece.piece_id)}
                       disabled={busyAction === `cut:${piece.piece_id}`}
                     >
                       Mark Cut
@@ -1511,7 +1699,24 @@ export function AdminApp({
 
       {tab === "assign" ? (
         <section className="panel">
-          <h2>Assign Work</h2>
+          <div className="panel-head">
+            <div>
+              <h2>Assign Work</h2>
+            </div>
+          </div>
+
+          <div className="tab-row wrap" style={{ marginBottom: "1rem" }}>
+            {ASSIGN_WORK_TABS.map((entry) => (
+              <button
+                key={entry.key}
+                type="button"
+                className={assignWorkTab === entry.key ? "tab-button active" : "tab-button"}
+                onClick={() => setAssignWorkTab(entry.key)}
+              >
+                {entry.label}
+              </button>
+            ))}
+          </div>
 
           <div className="cards-grid">
             {filteredAssignablePieces.map((piece) => {
@@ -1521,6 +1726,8 @@ export function AdminApp({
               };
 
               const order = data.orders.find((entry) => entry.order_id === piece.order_id);
+              const requiredRole = normalizeRoleValue(piece.assigned_role) || getRequiredRoleForPiece(piece.piece_name);
+              const eligibleKarigars = getEligibleKarigarsForPiece(piece);
 
               return (
                 <article className="card" key={piece.piece_id}>
@@ -1528,6 +1735,10 @@ export function AdminApp({
                     <strong>{piece.piece_name}</strong> - {piece.item_type}
                   </p>
                   <p className="muted">Order: {order?.order_number || "-"}</p>
+                  <p className="muted">
+                    Shop: {shopsById[order?.shop_id]?.shop_name || order?.shop_id || "-"}
+                  </p>
+                  <p className="muted">Required: {formatKarigarRoles(requiredRole)}</p>
 
                   <label>
                     Karigar
@@ -1545,13 +1756,16 @@ export function AdminApp({
                       }
                     >
                       <option value="">Select karigar</option>
-                      {data.karigars.map((karigar) => (
+                      {eligibleKarigars.map((karigar) => (
                         <option key={karigar.karigar_id} value={karigar.karigar_id}>
-                          {karigar.name}
+                          {karigar.name} - {formatKarigarRoles(karigar.role || karigar.skills)}
                         </option>
                       ))}
                     </select>
                   </label>
+                  {!eligibleKarigars.length ? (
+                    <p className="muted">No karigar has the required role yet.</p>
+                  ) : null}
 
                   <label>
                     Designing Charge
@@ -1575,7 +1789,11 @@ export function AdminApp({
                   <button
                     className="button"
                     onClick={() => assignPiece(piece.piece_id)}
-                    disabled={busyAction === `assign:${piece.piece_id}`}
+                    disabled={
+                      busyAction === `assign:${piece.piece_id}` ||
+                      !eligibleKarigars.length ||
+                      !draft.karigar_id
+                    }
                   >
                     {busyAction === `assign:${piece.piece_id}`
                       ? "Saving..."
@@ -1820,6 +2038,96 @@ export function AdminApp({
             </button>
           </form>
 
+          <div className="entity-dashboard">
+            <div className="entity-list-panel">
+              <h3>Partner Shops</h3>
+              <div className="entity-list">
+                {data.shops.map((shop) => {
+                  const financial = data.computed?.shopFinancials?.[shop.shop_id] || {
+                    billed: 0,
+                    paid: 0,
+                    balance: 0
+                  };
+                  const isSelected = selectedShop?.shop_id === shop.shop_id;
+
+                  return (
+                    <button
+                      key={shop.shop_id}
+                      type="button"
+                      className={isSelected ? "entity-list-row active" : "entity-list-row"}
+                      onClick={() => setSelectedShopId(shop.shop_id)}
+                    >
+                      <span>
+                        <strong>{shop.shop_name}</strong>
+                        <small>{shop.contact || "No contact"}</small>
+                      </span>
+                      <span>{formatCurrency(financial.balance)}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="entity-detail-panel">
+              {selectedShop ? (
+                <>
+                  <div className="panel-head">
+                    <div>
+                      <h3>{selectedShop.shop_name}</h3>
+                      <p className="muted">{selectedShop.contact || "No contact saved"}</p>
+                    </div>
+                    <StatusBadge label={`${selectedShopOrders.length} Orders`} tone="in-progress" />
+                  </div>
+                  <div className="metrics-grid three">
+                    <div className="metric-card">
+                      <p>Total Billed</p>
+                      <h3>{formatCurrency(selectedShopFinancial.billed)}</h3>
+                    </div>
+                    <div className="metric-card">
+                      <p>Total Received</p>
+                      <h3>{formatCurrency(selectedShopFinancial.paid)}</h3>
+                    </div>
+                    <div className="metric-card highlight">
+                      <p>Balance</p>
+                      <h3>{formatCurrency(selectedShopFinancial.balance)}</h3>
+                    </div>
+                  </div>
+
+                  <div className="inline-list entity-history">
+                    {selectedShopOrders.slice(0, 8).map((order) => (
+                      <div className="inline-list-row" key={order.order_id}>
+                        <span>
+                          <strong>{order.order_number}</strong> - {formatDate(order.delivery_date)}
+                        </span>
+                        <StatusBadge
+                          label={orderBadge(order.status).label}
+                          tone={orderBadge(order.status).tone}
+                        />
+                      </div>
+                    ))}
+                    {!selectedShopOrders.length ? (
+                      <p className="muted">No orders for this shop yet.</p>
+                    ) : null}
+                  </div>
+
+                  <div className="inline-list entity-history">
+                    {selectedShopPayments.slice(0, 5).map((payment) => (
+                      <div className="inline-list-row" key={payment.payment_id}>
+                        <span>{formatDate(payment.payment_date)}</span>
+                        <strong>{formatCurrency(payment.amount)}</strong>
+                      </div>
+                    ))}
+                    {!selectedShopPayments.length ? (
+                      <p className="muted">No payment history yet.</p>
+                    ) : null}
+                  </div>
+                </>
+              ) : (
+                <p className="muted">No shop selected.</p>
+              )}
+            </div>
+          </div>
+
           <div className="table-wrap">
             <table>
               <thead>
@@ -1892,6 +2200,21 @@ export function AdminApp({
                   }
                 />
               </label>
+              <div className="field-block">
+                <span className="field-label">Role/Specialty</span>
+                <div className="role-option-grid">
+                  {KARIGAR_ROLE_OPTIONS.map((role) => (
+                    <label className="check-tile" key={role.value}>
+                      <input
+                        type="checkbox"
+                        checked={getRoleValues(karigarForm.role).includes(role.value)}
+                        onChange={() => toggleKarigarRole("add", role.value)}
+                      />
+                      <span>{role.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
               <label>
                 Login Password
                 <input
@@ -1927,6 +2250,7 @@ export function AdminApp({
                       karigar_id: selected?.karigar_id || "",
                       name: selected?.name || "",
                       contact: selected?.contact || "",
+                      role: selected?.role || selected?.skills || "",
                       password: ""
                     });
                   }}
@@ -1965,6 +2289,21 @@ export function AdminApp({
                   }
                 />
               </label>
+              <div className="field-block">
+                <span className="field-label">Role/Specialty</span>
+                <div className="role-option-grid">
+                  {KARIGAR_ROLE_OPTIONS.map((role) => (
+                    <label className="check-tile" key={role.value}>
+                      <input
+                        type="checkbox"
+                        checked={getRoleValues(karigarEditForm.role).includes(role.value)}
+                        onChange={() => toggleKarigarRole("edit", role.value)}
+                      />
+                      <span>{role.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
               <p className="muted">
                 Login username: {karigarUsersByEntityId[karigarEditForm.karigar_id]?.username || karigarEditForm.name || "-"}
               </p>
@@ -2089,12 +2428,126 @@ export function AdminApp({
             </button>
           </form>
 
+          <div className="entity-dashboard">
+            <div className="entity-list-panel">
+              <h3>Workers</h3>
+              <div className="entity-list">
+                {data.karigars.map((karigar) => {
+                  const financial = data.computed?.karigarFinancials?.[karigar.karigar_id] || {
+                    earned: 0,
+                    pending: 0,
+                    paid: 0,
+                    balance: 0
+                  };
+                  const isSelected = selectedKarigar?.karigar_id === karigar.karigar_id;
+
+                  return (
+                    <button
+                      key={karigar.karigar_id}
+                      type="button"
+                      className={isSelected ? "entity-list-row active" : "entity-list-row"}
+                      onClick={() => setSelectedKarigarId(karigar.karigar_id)}
+                    >
+                      <span>
+                        <strong>{karigar.name}</strong>
+                        <small>{formatKarigarRoles(karigar.role || karigar.skills)}</small>
+                      </span>
+                      <span>{formatCurrency(financial.balance)}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="entity-detail-panel">
+              {selectedKarigar ? (
+                <>
+                  <div className="panel-head">
+                    <div>
+                      <h3>{selectedKarigar.name}</h3>
+                      <p className="muted">
+                        {formatKarigarRoles(selectedKarigar.role || selectedKarigar.skills)}
+                      </p>
+                    </div>
+                    <StatusBadge
+                      label={`${selectedKarigarCompletedCount}/${selectedKarigarPieces.length} Done`}
+                      tone="ready"
+                    />
+                  </div>
+                  <div className="metrics-grid three">
+                    <div className="metric-card">
+                      <p>Earned</p>
+                      <h3>{formatCurrency(selectedKarigarFinancial.earned)}</h3>
+                    </div>
+                    <div className="metric-card">
+                      <p>Pending Sync</p>
+                      <h3>{formatCurrency(selectedKarigarFinancial.pending)}</h3>
+                    </div>
+                    <div className="metric-card highlight">
+                      <p>Balance</p>
+                      <h3>{formatCurrency(selectedKarigarFinancial.balance)}</h3>
+                    </div>
+                  </div>
+
+                  <div className="inline-list entity-history">
+                    {selectedKarigarPieces.slice(0, 10).map((piece) => {
+                      const order = ordersById[piece.order_id];
+                      const isCuttingCredit = piece.cutting_by === selectedKarigar.karigar_id;
+                      return (
+                        <div className="inline-list-row" key={`${piece.piece_id}-${isCuttingCredit ? "cut" : "work"}`}>
+                          <span>
+                            <strong>
+                              {isCuttingCredit
+                                ? `Cutting: ${piece.bundle_piece_type || piece.piece_name}`
+                                : piece.piece_name}
+                            </strong>{" "}
+                            - Order {order?.order_number || "-"}
+                          </span>
+                          <StatusBadge
+                            label={
+                              isCuttingCredit
+                                ? "Cut"
+                                : pieceBadge(piece.karigar_status).label
+                            }
+                            tone={
+                              isCuttingCredit
+                                ? "cutting"
+                                : pieceBadge(piece.karigar_status).tone
+                            }
+                          />
+                        </div>
+                      );
+                    })}
+                    {!selectedKarigarPieces.length ? (
+                      <p className="muted">No work history for this karigar yet.</p>
+                    ) : null}
+                  </div>
+
+                  <div className="inline-list entity-history">
+                    {selectedKarigarPayments.slice(0, 5).map((payment) => (
+                      <div className="inline-list-row" key={payment.payment_id}>
+                        <span>{formatDate(payment.payment_date)}</span>
+                        <strong>{formatCurrency(payment.amount)}</strong>
+                      </div>
+                    ))}
+                    {!selectedKarigarPayments.length ? (
+                      <p className="muted">No payment history yet.</p>
+                    ) : null}
+                  </div>
+                </>
+              ) : (
+                <p className="muted">No karigar selected.</p>
+              )}
+            </div>
+          </div>
+
           <div className="table-wrap">
             <table>
               <thead>
                 <tr>
                   <th>Name</th>
                   <th>Contact</th>
+                  <th>Role</th>
                   <th>Total Earned</th>
                   <th>Total Paid</th>
                   <th>Balance</th>
@@ -2111,6 +2564,7 @@ export function AdminApp({
                     <tr key={entry.karigar_id}>
                       <td>{entry.name}</td>
                       <td>{entry.contact || "-"}</td>
+                      <td>{formatKarigarRoles(entry.role || entry.skills)}</td>
                       <td>{formatCurrency(financial.earned)}</td>
                       <td>{formatCurrency(financial.paid)}</td>
                       <td>{formatCurrency(financial.balance)}</td>
