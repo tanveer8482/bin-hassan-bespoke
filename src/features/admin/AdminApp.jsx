@@ -271,12 +271,19 @@ export function AdminApp({ data, actions, busyAction, orderSearchQuery = "", sel
         return "Overdue";
       case "pendingCutting":
         return "Pending Cutting";
+      case "pendingApproval":
+        return "Pending Approvals";
       case "ready":
         return "Ready for Delivery";
       default:
         return "All Orders";
     }
   }, [dashboardFilter]);
+
+  const pendingApprovalCount = useMemo(
+    () => data.pieces.filter((piece) => piece.karigar_status === "pending_approval").length,
+    [data.pieces]
+  );
 
   const handleShopFilterChange = useCallback((value) => {
     debouncedSetOrderFilter((current) => ({ ...current, shop_id: value }));
@@ -305,6 +312,10 @@ export function AdminApp({ data, actions, busyAction, orderSearchQuery = "", sel
       if (dashboardFilter === "pendingCutting") {
         const orderPieces = piecesByOrder[order.order_id] || [];
         if (!orderPieces.some((piece) => !normalizeBool(piece.cutting_done))) return false;
+      }
+      if (dashboardFilter === "pendingApproval") {
+        const orderPieces = piecesByOrder[order.order_id] || [];
+        if (!orderPieces.some((piece) => piece.karigar_status === "pending_approval")) return false;
       }
       if (dashboardFilter === "ready") {
         const orderPieces = piecesByOrder[order.order_id] || [];
@@ -839,6 +850,15 @@ export function AdminApp({ data, actions, busyAction, orderSearchQuery = "", sel
             </button>
             <button
               type="button"
+              className={`metric-card metric-card-action ${dashboardFilter === "pendingApproval" ? "selected" : ""}`}
+              onClick={() => handleDashboardFilterClick("pendingApproval")}
+              aria-pressed={dashboardFilter === "pendingApproval"}
+            >
+              <p>Pending Approvals</p>
+              <h3>{pendingApprovalCount}</h3>
+            </button>
+            <button
+              type="button"
               className={`metric-card metric-card-action highlight ${dashboardFilter === "ready" ? "selected" : ""}`}
               onClick={() => handleDashboardFilterClick("ready")}
               aria-pressed={dashboardFilter === "ready"}
@@ -896,79 +916,11 @@ export function AdminApp({ data, actions, busyAction, orderSearchQuery = "", sel
                 <p className="muted">No orders match this filter.</p>
               )}
             </div>
-          ) : null}
-
-          <div className="panel inset warning-box" style={{ margin: '1rem 0' }}>
-             <div className="panel-head">
-                <h3>Admin Batch Controls</h3>
-                <button 
-                  className="button primary" 
-                  onClick={handleSyncPayroll}
-                  disabled={syncBusy}
-                >
-                  {syncBusy ? "Syncing..." : "Sync Completed Pieces to Payroll"}
-                </button>
-             </div>
-          </div>
-
-          <div className="split-grid">
-            <div className="panel inset">
-              <h3>Pending Approvals (QC)</h3>
-              {data.pieces.filter(p => p.karigar_status === "pending_approval").map((piece) => (
-                <div className="inline-list-row" key={piece.piece_id}>
-                  <div>
-                    <strong>{piece.piece_name}</strong> - {piece.item_type}
-                    <p className="muted">Order: {ordersById[piece.order_id]?.order_number}</p>
-                  </div>
-                  <button 
-                    className="button success small" 
-                    onClick={() => handleApprovePiece(piece.piece_id)}
-                    disabled={busyAction === `approve:${piece.piece_id}`}
-                  >
-                    {busyAction === `approve:${piece.piece_id}` ? "Saving..." : "Approve"}
-                  </button>
-                </div>
-              ))}
-              {!data.pieces.filter(p => p.karigar_status === "pending_approval").length ? (
-                <p className="muted">No pieces waiting for approval.</p>
-              ) : null}
+          ) : (
+            <div className="panel inset" style={{ margin: "1rem 0" }}>
+              <p className="muted">Select a category to view orders.</p>
             </div>
-
-            <div className="panel inset">
-              <h3>Due Today</h3>
-              {dueSummary.dueToday.map((order) => (
-                <div className="inline-list-row" key={order.order_id}>
-                  <span>
-                    {order.order_number} - {shopsById[order.shop_id]?.shop_name || order.shop_id}
-                  </span>
-                  <StatusBadge
-                    label={orderBadge(order.status).label}
-                    tone={orderBadge(order.status).tone}
-                  />
-                </div>
-              ))}
-              {!dueSummary.dueToday.length ? (
-                <p className="muted">No orders due today.</p>
-              ) : null}
-            </div>
-            <div className="panel inset">
-              <h3>Overdue Orders</h3>
-              {dueSummary.overdue.map((order) => (
-                <div className="inline-list-row" key={order.order_id}>
-                  <span>
-                    {order.order_number} - {formatDate(order.delivery_date)}
-                  </span>
-                  <StatusBadge
-                    label={orderBadge(order.status).label}
-                    tone={orderBadge(order.status).tone}
-                  />
-                </div>
-              ))}
-              {!dueSummary.overdue.length ? (
-                <p className="muted">No overdue orders.</p>
-              ) : null}
-            </div>
-          </div>
+          )}
         </section>
       ) : null}
 

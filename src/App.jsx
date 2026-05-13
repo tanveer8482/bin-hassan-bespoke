@@ -777,6 +777,23 @@ export default function App() {
                 </button>
               ))}
             </nav>
+
+            <div className="panel inset" style={{ margin: 0 }}>
+              <div className="panel-head" style={{ padding: 0, gap: 10 }}>
+                <h3 style={{ margin: 0, fontSize: "1rem" }}>Admin Batch Controls</h3>
+              </div>
+              <button
+                className="button primary"
+                type="button"
+                onClick={() => {
+                  actions.syncPayroll?.();
+                  setMobileNavOpen(false);
+                }}
+              >
+                Sync Completed Pieces to Payroll
+              </button>
+            </div>
+
             <div className="drawer-action-group">
               {user?.role !== "karigar" && user?.role !== "shop" && (
                 <button
