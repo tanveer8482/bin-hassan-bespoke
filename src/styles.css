@@ -489,16 +489,19 @@ label {
   position: absolute;
   top: 0;
   left: 0;
-  bottom: 0;
   width: min(280px, 70vw);
   max-width: 280px;
-  padding: 20px;
+  height: 100vh;
+  height: 100dvh;
+  padding: 20px 20px max(20px, env(safe-area-inset-bottom));
   background: rgba(255, 255, 255, 0.96);
   backdrop-filter: blur(18px);
   border-right: 1px solid rgba(226, 232, 240, 0.9);
   box-shadow: 18px 0 50px rgba(15, 23, 42, 0.16);
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 18px;
+  overflow: hidden;
   transform: translateX(-100%);
   transition: transform 0.28s ease;
 }
@@ -541,6 +544,9 @@ label {
 .drawer-nav {
   display: grid;
   gap: 10px;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
 }
 
 .drawer-nav .tab-button {
@@ -552,6 +558,8 @@ label {
   display: grid;
   gap: 10px;
   margin-top: auto;
+  flex-shrink: 0;
+  padding-top: 2px;
 }
 
 .drawer-action-group .button {
