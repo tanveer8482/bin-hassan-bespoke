@@ -33,6 +33,7 @@ const ASSIGN_WORK_TABS = [
 export const TAB_LIST = [
   { key: "dashboard", label: "Dashboard" },
   { key: "orders", label: "Orders" },
+  { key: "previous_orders", label: "Previous Orders" },
   { key: "shops", label: "Shops" },
   { key: "karigar", label: "Karigars" },
   { key: "settings", label: "Settings" },
@@ -166,7 +167,8 @@ function OrderListCard({
   onStatusChange,
   onApprovePiece,
   onDeliverOrder,
-  onAssignWork
+  onAssignWork,
+  isPrevious
 }) {
   const badge = orderBadge(order.status);
   const statusBusy =
@@ -186,6 +188,7 @@ function OrderListCard({
         <span className="order-summary-main">
           <strong className="order-number">{order.order_number}</strong>
           <span className="order-shop">{shopName}</span>
+          {isPrevious && <span className="status-badge" style={{marginLeft: 8, fontSize: '0.7em', background: '#e0e0e0', color: '#555'}}>Previous Order</span>}
         </span>
         <StatusBadge label={badge.label} tone={badge.tone} />
       </button>
@@ -609,7 +612,13 @@ export function AdminApp({
     return data.orders.filter((order) => {
       const orderPieces = piecesByOrder[order.order_id] || [];
       const hasArchivedPieces = archivedPieces.some((piece) => piece.order_id === order.order_id);
-      if (!normalizedOrderSearchQuery && !orderPieces.length && hasArchivedPieces) return false;
+      const isPrevious = normalizeBool(order.is_archived) || order.status === "settled" || order.status === "archived" || (!orderPieces.length && hasArchivedPieces);
+
+      if (!normalizedOrderSearchQuery) {
+        if (tab === "previous_orders" && !isPrevious) return false;
+        if (tab !== "previous_orders" && isPrevious) return false;
+      }
+
       if (orderFilter.status !== "all" && order.status !== orderFilter.status) return false;
       if (orderFilter.shop_id !== "all" && order.shop_id !== orderFilter.shop_id) return false;
       if (!orderMatchesGlobalSearch(order)) return false;
@@ -637,7 +646,8 @@ export function AdminApp({
     dueSummary,
     piecesByOrder,
     archivedPieces,
-    normalizedOrderSearchQuery
+    normalizedOrderSearchQuery,
+    tab
   ]);
 
   const pendingCutPieces = useMemo(() => {
@@ -1281,10 +1291,13 @@ export function AdminApp({
         const total = data.computed?.orderTotals?.[order.order_id]?.grand_total || 0;
         const shopName = shopsById[order.shop_id]?.shop_name || order.shop_id || "-";
         const isExpanded = expandedOrderId === order.order_id;
+        const hasArchivedPieces = archivedPieces.some((piece) => piece.order_id === order.order_id);
+        const isPrevious = normalizeBool(order.is_archived) || order.status === "settled" || order.status === "archived" || (!orderPieces.length && hasArchivedPieces);
 
         return (
           <OrderListCard
             key={order.order_id}
+            isPrevious={isPrevious}
             order={order}
             shopName={shopName}
             total={total}
@@ -1832,6 +1845,49 @@ export function AdminApp({
                 : "No orders found."
             )}
           </div>
+        </section>
+      ) : null}
+
+      {tab === "previous_orders" ? (
+        <section className="panel">
+          <h2>Previous Orders</h2>
+          <p className="muted" style={{ marginBottom: "1rem" }}>
+            Orders that have been settled or synced to payroll.
+          </p>
+
+          <div className="panel inset">
+            <div className="panel-head">
+              <h3>Search & Filter</h3>
+            </div>
+            <div className="form-grid">
+              <input
+                className="input"
+                placeholder="Search orders..."
+                value={orderSearchQuery}
+                onChange={(event) => onOrderSearchChange(event.target.value)}
+              />
+
+              <select
+                className="input"
+                value={orderFilter.shop_id}
+                onChange={(event) => handleShopFilterChange(event.target.value)}
+              >
+                <option value="all">All Shops</option>
+                {data.shops.map((shop) => (
+                  <option key={shop.shop_id} value={shop.shop_id}>
+                    {shop.shop_name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {renderOrderList(
+            filteredOrders,
+            orderSearchQuery.trim()
+              ? "No previous orders found matching your search."
+              : "No previous orders found."
+          )}
         </section>
       ) : null}
 
