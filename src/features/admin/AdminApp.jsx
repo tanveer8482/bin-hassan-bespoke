@@ -1341,15 +1341,9 @@ export function AdminApp({
       {tab === "dashboard" ? (
         <section className="panel">
           <h2>Live Dashboard</h2>
-          <div className="panel-head">
-            <div>
-              <h3>Central Ledger</h3>
-              <p className="muted">Master payable, receivable, and net balance report.</p>
-            </div>
-            <button type="button" className="button primary" onClick={handleDownloadMasterLedger}>
-              Download Master Ledger
-            </button>
-          </div>
+          <p className="muted" style={{ marginBottom: "1rem" }}>
+            Overview of active tailor workshop orders.
+          </p>
 
           <div className="metrics-grid five">
             <button
@@ -1408,49 +1402,6 @@ export function AdminApp({
             </button>
           </div>
 
-          <div className="financial-stats-grid">
-            <div className="panel inset financial-stats-card">
-              <div className="panel-head">
-                <div>
-                  <h3>Payable to Karigars</h3>
-                  <p className="muted">Approved and pending-sync work liability</p>
-                </div>
-                <strong>{formatCurrency(financialOverview.totalPayable)}</strong>
-              </div>
-              <div className="inline-list compact-list">
-                {financialOverview.karigarRows.slice(0, 6).map((row) => (
-                  <div className="inline-list-row" key={row.id}>
-                    <span>{row.name}</span>
-                    <strong>{formatCurrency(row.payable)}</strong>
-                  </div>
-                ))}
-                {!financialOverview.karigarRows.length ? (
-                  <p className="muted">No payable balance right now.</p>
-                ) : null}
-              </div>
-            </div>
-
-            <div className="panel inset financial-stats-card">
-              <div className="panel-head">
-                <div>
-                  <h3>Receivable from Shops</h3>
-                  <p className="muted">Outstanding shop billing balance</p>
-                </div>
-                <strong>{formatCurrency(financialOverview.totalReceivable)}</strong>
-              </div>
-              <div className="inline-list compact-list">
-                {financialOverview.shopRows.slice(0, 6).map((row) => (
-                  <div className="inline-list-row" key={row.id}>
-                    <span>{row.name}</span>
-                    <strong>{formatCurrency(row.receivable)}</strong>
-                  </div>
-                ))}
-                {!financialOverview.shopRows.length ? (
-                  <p className="muted">No receivable balance right now.</p>
-                ) : null}
-              </div>
-            </div>
-          </div>
 
           {dashboardFilter !== "all" ? (
             <div className="panel inset" style={{ margin: "1rem 0" }}>
@@ -2886,6 +2837,50 @@ export function AdminApp({
       {tab === "payments" ? (
         <section className="panel">
           <h2>Payments</h2>
+
+          <div className="financial-stats-grid" style={{ marginBottom: "1.5rem" }}>
+            <div className="panel inset financial-stats-card">
+              <div className="panel-head">
+                <div>
+                  <h3>Payable to Karigars</h3>
+                  <p className="muted">Approved and pending-sync work liability</p>
+                </div>
+                <strong>{formatCurrency(financialOverview.totalPayable)}</strong>
+              </div>
+              <div className="inline-list compact-list">
+                {financialOverview.karigarRows.slice(0, 6).map((row) => (
+                  <div className="inline-list-row" key={row.id}>
+                    <span>{row.name}</span>
+                    <strong>{formatCurrency(row.payable)}</strong>
+                  </div>
+                ))}
+                {!financialOverview.karigarRows.length ? (
+                  <p className="muted">No payable balance right now.</p>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="panel inset financial-stats-card">
+              <div className="panel-head">
+                <div>
+                  <h3>Receivable from Shops</h3>
+                  <p className="muted">Outstanding shop billing balance</p>
+                </div>
+                <strong>{formatCurrency(financialOverview.totalReceivable)}</strong>
+              </div>
+              <div className="inline-list compact-list">
+                {financialOverview.shopRows.slice(0, 6).map((row) => (
+                  <div className="inline-list-row" key={row.id}>
+                    <span>{row.name}</span>
+                    <strong>{formatCurrency(row.receivable)}</strong>
+                  </div>
+                ))}
+                {!financialOverview.shopRows.length ? (
+                  <p className="muted">No receivable balance right now.</p>
+                ) : null}
+              </div>
+            </div>
+          </div>
 
           <div className="split-grid">
             <form className="panel inset" onSubmit={submitShopPayment}>

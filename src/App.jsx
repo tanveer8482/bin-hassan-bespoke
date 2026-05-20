@@ -13,6 +13,7 @@ import { emptySnapshot } from "./lib/emptySnapshot";
 import { formatDateTime } from "./lib/format";
 import { SyncBar } from "./components/SyncBar";
 import { AdminApp, TAB_LIST as ADMIN_TAB_LIST } from "./features/admin/AdminApp";
+import { generateMasterLedgerPdf } from "./lib/pdfReport";
 import { KarigarApp } from "./features/karigar/KarigarApp";
 import { ShopApp } from "./features/shop/ShopApp";
 import { CuttingApp } from "./features/cutting/CuttingApp";
@@ -782,16 +783,33 @@ export default function App() {
               <div className="panel-head" style={{ padding: 0, gap: 10 }}>
                 <h3 style={{ margin: 0, fontSize: "1rem" }}>Admin Batch Controls</h3>
               </div>
-              <button
-                className="button primary"
-                type="button"
-                onClick={() => {
-                  actions.syncPayroll?.();
-                  setMobileNavOpen(false);
-                }}
-              >
-                Sync Completed Pieces to Payroll
-              </button>
+              <div style={{ display: "grid", gap: "10px" }}>
+                <button
+                  className="button primary"
+                  type="button"
+                  onClick={() => {
+                    actions.syncPayroll?.();
+                    setMobileNavOpen(false);
+                  }}
+                >
+                  Sync Completed Pieces to Payroll
+                </button>
+                <button
+                  className="button primary"
+                  type="button"
+                  onClick={() => {
+                    generateMasterLedgerPdf({
+                      karigars: data.karigars,
+                      shops: data.shops,
+                      karigarFinancials: data.computed?.karigarFinancials || {},
+                      shopFinancials: data.computed?.shopFinancials || {}
+                    });
+                    setMobileNavOpen(false);
+                  }}
+                >
+                  Download Master Ledger
+                </button>
+              </div>
             </div>
 
             <div className="drawer-action-group">
