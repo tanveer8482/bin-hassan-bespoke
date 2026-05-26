@@ -607,6 +607,7 @@ async function syncPayroll(req, res) {
 
   const updates = Array.from(updatesByPieceId.values());
   await updateMany(SHEETS.PIECES, updates);
+
   const cuttingCredits = cuttingWork.map((piece) => ({
     ...piece,
     assigned_karigar_id: piece.cutting_by,
@@ -615,6 +616,31 @@ async function syncPayroll(req, res) {
     designing_karigar_charge: 0
   }));
   const syncedPieces = [...completedWork, ...cuttingCredits];
+  const updatedPiecesById = new Map(updates.map((entry) => [entry.record.piece_id, entry.record]));
+  const piecesAfterSync = pieces.map((piece) => updatedPiecesById.get(piece.piece_id) || piece);
+  const syncedOrderIds = new Set(syncedPieces.map((piece) => piece.order_id).filter(Boolean));
+  if (syncedOrderIds.size) {
+    const orders = await getRecords(SHEETS.ORDERS);
+    const orderUpdates = orders
+      .filter((order) => syncedOrderIds.has(order.order_id))
+      .filter((order) => normalizeKey(order.is_archived) !== "true")
+      .filter((order) => {
+        const orderPieces = piecesAfterSync.filter((piece) => piece.order_id === order.order_id);
+        return orderPieces.length && orderPieces.every((piece) => normalizeKey(piece.is_synced) === "true");
+      })
+      .map((order) => ({
+        rowNumber: order.__rowNumber,
+        record: {
+          ...order,
+          status: STATUS.ORDER.ARCHIVED,
+          is_archived: "TRUE",
+          updated_date: nowISO()
+        }
+      }));
+
+    if (orderUpdates.length) await updateMany(SHEETS.ORDERS, orderUpdates);
+  }
+
   const totalAmount = syncedPieces.reduce(
     (sum, piece) => sum + toNumber(piece.karigar_rate) + toNumber(piece.designing_karigar_charge),
     0

@@ -153,6 +153,11 @@ function isArchivedPiece(piece) {
   return normalizeBool(piece?.is_synced) || normalizeBool(piece?.cutting_credit_synced);
 }
 
+function isArchivedOrder(order) {
+  const status = normalizeRoleValue(order?.status);
+  return normalizeBool(order?.is_archived) || status === "archived" || status === "settled";
+}
+
 function pieceMatchesAssignTab(piece, activeTab) {
   if (activeTab === "all") return true;
   const normalized = normalizeRoleValue(piece.piece_name);
@@ -166,6 +171,7 @@ function OrderListCard({
   total,
   orderItems,
   orderPieces,
+  isPreviousOrder = false,
   completeCount,
   isExpanded,
   busyAction,
@@ -175,7 +181,9 @@ function OrderListCard({
   onDeliverOrder,
   onAssignWork
 }) {
-  const badge = orderBadge(order.status);
+  const badge = isPreviousOrder
+    ? { label: "Previous Order", tone: "delivered" }
+    : orderBadge(order.status);
   const statusBusy =
     busyAction === "updateOrder" || busyAction === `deliver:${order.order_id}`;
   const readyForDelivery =
@@ -266,6 +274,7 @@ function OrderListCard({
             )}
           </div>
 
+          {!isPreviousOrder ? (
           <div className="order-expanded-actions">
             <label>
               Status
@@ -300,6 +309,9 @@ function OrderListCard({
               </button>
             ) : null}
           </div>
+          ) : (
+            <p className="muted">This order is already moved to Previous Orders.</p>
+          )}
         </div>
       ) : null}
     </article>
@@ -593,6 +605,22 @@ export function AdminApp({
     }, {});
   }, [activePieces]);
 
+  const previousOrders = useMemo(() => {
+    return data.orders
+      .filter((order) => {
+        if (isArchivedOrder(order)) return true;
+        const hasArchivedPieces = archivedPieces.some((piece) => piece.order_id === order.order_id);
+        const hasActivePieces = (piecesByOrder[order.order_id] || []).length > 0;
+        return hasArchivedPieces && !hasActivePieces;
+      })
+      .sort((a, b) => new Date(b.updated_date || b.delivery_date || 0) - new Date(a.updated_date || a.delivery_date || 0));
+  }, [archivedPieces, data.orders, piecesByOrder]);
+
+  const previousOrderIds = useMemo(
+    () => new Set(previousOrders.map((order) => order.order_id)),
+    [previousOrders]
+  );
+
   const debouncedSetOrderFilter = useCallback(
     debounce((newFilter) => setOrderFilter(newFilter), 300),
     []
@@ -602,7 +630,10 @@ export function AdminApp({
     setDashboardFilter((current) => (current === category ? "all" : category));
   }, []);
 
-  const dueSummary = useMemo(() => filterTodayAndOverdue(data.orders), [data.orders]);
+  const dueSummary = useMemo(
+    () => filterTodayAndOverdue(data.orders.filter((order) => !previousOrderIds.has(order.order_id))),
+    [data.orders, previousOrderIds]
+  );
 
   const dashboardFilterLabel = useMemo(() => {
     switch (dashboardFilter) {
@@ -642,11 +673,12 @@ export function AdminApp({
 
     return data.orders.filter((order) => {
       const orderPieces = piecesByOrder[order.order_id] || [];
-      const hasArchivedPieces = archivedPieces.some((piece) => piece.order_id === order.order_id);
-      if (!normalizedOrderSearchQuery && !orderPieces.length && hasArchivedPieces) return false;
+      const isPreviousOrder = previousOrderIds.has(order.order_id);
+      if (isPreviousOrder && !normalizedOrderSearchQuery) return false;
       if (orderFilter.status !== "all" && order.status !== orderFilter.status) return false;
       if (orderFilter.shop_id !== "all" && order.shop_id !== orderFilter.shop_id) return false;
       if (!orderMatchesGlobalSearch(order)) return false;
+      if (isPreviousOrder) return true;
 
       if (dashboardFilter === "active" && order.status === "delivered") return false;
       if (dashboardFilter === "dueToday" && !dueTodayIds.has(order.order_id)) return false;
@@ -670,7 +702,7 @@ export function AdminApp({
     dashboardFilter,
     dueSummary,
     piecesByOrder,
-    archivedPieces,
+    previousOrderIds,
     normalizedOrderSearchQuery
   ]);
 
@@ -734,7 +766,9 @@ export function AdminApp({
     const dueTomorrow = [];
     const ready = [];
 
-    data.orders.forEach((order) => {
+    data.orders
+      .filter((order) => !previousOrderIds.has(order.order_id))
+      .forEach((order) => {
       const pieces = piecesByOrder[order.order_id] || [];
       if (!pieces.length && archivedPieces.some((piece) => piece.order_id === order.order_id)) return;
       const pendingPieces = pieces.filter((piece) => !isApprovedPiece(piece));
@@ -768,7 +802,7 @@ export function AdminApp({
       dueTomorrow,
       ready
     };
-  }, [data.orders, piecesByOrder, archivedPieces]);
+  }, [data.orders, piecesByOrder, archivedPieces, previousOrderIds]);
 
   const karigarDelayRows = useMemo(() => {
     const now = new Date();
@@ -824,11 +858,14 @@ export function AdminApp({
     });
   }, [data.karigars, activePieces]);
 
-  const selectedTrackOrderId = trackOrderId || data.orders[0]?.order_id || "";
-  const selectedTrackOrder = data.orders.find((order) => order.order_id === selectedTrackOrderId);
+  const trackableOrders = data.orders.filter((order) => !previousOrderIds.has(order.order_id));
+  const selectedTrackOrderId = trackOrderId || trackableOrders[0]?.order_id || "";
+  const selectedTrackOrder = trackableOrders.find((order) => order.order_id === selectedTrackOrderId);
   const selectedTrackPieces = piecesByOrder[selectedTrackOrderId] || [];
   const selectedShopOrders = selectedShop
-    ? data.orders.filter((order) => order.shop_id === selectedShop.shop_id)
+    ? data.orders.filter(
+        (order) => order.shop_id === selectedShop.shop_id && !previousOrderIds.has(order.order_id)
+      )
     : [];
   const selectedShopPayments = selectedShop
     ? data.paymentsShops.filter((payment) => payment.shop_id === selectedShop.shop_id)
@@ -1306,6 +1343,7 @@ export function AdminApp({
         const total = data.computed?.orderTotals?.[order.order_id]?.grand_total || 0;
         const shopName = shopsById[order.shop_id]?.shop_name || order.shop_id || "-";
         const isExpanded = expandedOrderId === order.order_id;
+        const isPreviousOrder = previousOrderIds.has(order.order_id);
 
         return (
           <OrderListCard
@@ -1315,6 +1353,7 @@ export function AdminApp({
             total={total}
             orderItems={orderItems}
             orderPieces={orderPieces}
+            isPreviousOrder={isPreviousOrder}
             completeCount={completeCount}
             isExpanded={isExpanded}
             busyAction={busyAction}
@@ -3115,6 +3154,43 @@ export function AdminApp({
         <section className="panel">
           <div className="panel-head">
             <div>
+              <h2>Previous Orders</h2>
+              <p className="muted">Payroll-synced orders are kept here and removed from active payments/hisab.</p>
+            </div>
+          </div>
+
+          <div className="table-wrap" style={{ marginBottom: "1rem" }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Order</th>
+                  <th>Shop</th>
+                  <th>Delivery</th>
+                  <th>Amount</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {previousOrders.map((order) => (
+                  <tr key={order.order_id}>
+                    <td>{order.order_number || order.order_id || "-"}</td>
+                    <td>{shopsById[order.shop_id]?.shop_name || order.shop_id || "-"}</td>
+                    <td>{formatDate(order.delivery_date)}</td>
+                    <td>{formatCurrency(data.computed?.orderTotals?.[order.order_id]?.grand_total || 0)}</td>
+                    <td><StatusBadge label="Previous Order" tone="delivered" /></td>
+                  </tr>
+                ))}
+                {!previousOrders.length ? (
+                  <tr>
+                    <td colSpan={5} className="muted">No previous orders yet.</td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="panel-head">
+            <div>
               <h2>Payroll History</h2>
               <p className="muted">Paid and payroll-settled work is kept here for audit/search.</p>
             </div>
@@ -3294,7 +3370,7 @@ export function AdminApp({
                 value={selectedTrackOrderId}
                 onChange={(event) => setTrackOrderId(event.target.value)}
               >
-                {data.orders.map((order) => (
+                {trackableOrders.map((order) => (
                   <option key={order.order_id} value={order.order_id}>
                     {order.order_number} - {shopsById[order.shop_id]?.shop_name || order.shop_id}
                   </option>

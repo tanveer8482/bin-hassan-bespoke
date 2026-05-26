@@ -57,6 +57,7 @@ export const ORDER_STATUS_META = {
   in_progress: { label: "In Progress", tone: "in-progress" },
   ready: { label: "Ready", tone: "ready" },
   settled: { label: "Settled", tone: "delivered" },
+  archived: { label: "Previous Order", tone: "delivered" },
   delivered: { label: "Delivered", tone: "delivered" }
 };
 
