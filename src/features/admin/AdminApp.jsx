@@ -12,7 +12,7 @@ import {
   PIECE_STATUS_META
 } from "../../lib/format";
 import { preparePhotoPayloadForApi } from "../../lib/api";
-import { generateMasterLedgerPdf, generateMasterPayrollPdf } from "../../lib/pdfReport";
+import { generateMasterPayrollPdf } from "../../lib/pdfReport";
 
 
 const PIECE_TYPES = ["coat", "pent", "waistcoat", "suit_2piece", "suit_3piece"];
@@ -91,6 +91,13 @@ function normalizeRoleValue(value) {
     .trim()
     .toLowerCase()
     .replace(/[\s-]+/g, "_");
+}
+
+function normalizeLookupValue(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
 }
 
 function getRoleValues(value) {
@@ -460,9 +467,14 @@ export function AdminApp({
     }, {});
   }, [data.users]);
   const productsForSelectedShop = useMemo(() => {
-    const selectedShopName = shopsById[orderForm.shop_id]?.shop_name;
+    const selectedShop = shopsById[orderForm.shop_id];
+    const selectedShopName = normalizeLookupValue(selectedShop?.shop_name);
     if (!selectedShopName) return [];
-    return data.products.filter((product) => product.shop_name === selectedShopName);
+    return data.products.filter(
+      (product) =>
+        product.shop_id === orderForm.shop_id ||
+        normalizeLookupValue(product.shop_name) === selectedShopName
+    );
   }, [data.products, orderForm.shop_id, shopsById]);
 
   const karigarById = useMemo(() => byId(data.karigars, "karigar_id"), [data.karigars]);
@@ -480,6 +492,28 @@ export function AdminApp({
   }, [data.users]);
 
   const ordersById = useMemo(() => byId(data.orders, "order_id"), [data.orders]);
+  const orderItemsById = useMemo(() => byId(data.orderItems, "item_id"), [data.orderItems]);
+  const productsById = useMemo(() => byId(data.products, "product_id"), [data.products]);
+  const getCuttingCreditAmount = useCallback(
+    (piece) => {
+      const storedAmount = number(piece?.cutting_credit_amount);
+      if (storedAmount > 0) return storedAmount;
+
+      const item = orderItemsById[piece?.item_id] || {};
+      const normalizedPieceName = normalizeLookupValue(
+        piece?.bundle_piece_type || item.piece_type || piece?.piece_name
+      );
+      const product =
+        productsById[piece?.product_id] ||
+        productsById[item.product_id] ||
+        data.products.find(
+          (entry) => normalizeLookupValue(entry.product_name) === normalizedPieceName
+        );
+
+      return number(product?.cutting_rate);
+    },
+    [data.products, orderItemsById, productsById]
+  );
   const selectedShop = data.shops.find(
     (shop) => shop.shop_id === (selectedShopId || data.shops[0]?.shop_id)
   );
@@ -538,7 +572,7 @@ export function AdminApp({
           archive_key: `${piece.piece_id}-cutting`,
           archive_piece_name: `Cutting: ${piece.bundle_piece_type || piece.piece_name}`,
           archive_karigar_id: piece.cutting_by,
-          archive_amount: number(piece.cutting_credit_amount)
+          archive_amount: getCuttingCreditAmount(piece)
         });
       }
       return rows.length ? rows : [{
@@ -549,7 +583,7 @@ export function AdminApp({
         archive_amount: number(piece.karigar_rate) + number(piece.designing_karigar_charge)
       }];
     });
-  }, [archivedPieces]);
+  }, [archivedPieces, getCuttingCreditAmount]);
 
   const piecesByOrder = useMemo(() => {
     return activePieces.reduce((map, piece) => {
@@ -975,15 +1009,6 @@ export function AdminApp({
     }
   };
 
-  const handleDownloadMasterLedger = () => {
-    generateMasterLedgerPdf({
-      karigars: data.karigars,
-      shops: data.shops,
-      karigarFinancials: data.computed?.karigarFinancials || {},
-      shopFinancials: data.computed?.shopFinancials || {}
-    });
-  };
-
   const markCuttingPiece = async (pieceId) => {
     await actions.markPieceCut({
       piece_id: pieceId,
@@ -1341,15 +1366,6 @@ export function AdminApp({
       {tab === "dashboard" ? (
         <section className="panel">
           <h2>Live Dashboard</h2>
-          <div className="panel-head">
-            <div>
-              <h3>Central Ledger</h3>
-              <p className="muted">Master payable, receivable, and net balance report.</p>
-            </div>
-            <button type="button" className="button primary" onClick={handleDownloadMasterLedger}>
-              Download Master Ledger
-            </button>
-          </div>
 
           <div className="metrics-grid five">
             <button
@@ -1406,50 +1422,6 @@ export function AdminApp({
               <p>Ready for Delivery</p>
               <h3>{dashboard.orders_ready_for_delivery}</h3>
             </button>
-          </div>
-
-          <div className="financial-stats-grid">
-            <div className="panel inset financial-stats-card">
-              <div className="panel-head">
-                <div>
-                  <h3>Payable to Karigars</h3>
-                  <p className="muted">Approved and pending-sync work liability</p>
-                </div>
-                <strong>{formatCurrency(financialOverview.totalPayable)}</strong>
-              </div>
-              <div className="inline-list compact-list">
-                {financialOverview.karigarRows.slice(0, 6).map((row) => (
-                  <div className="inline-list-row" key={row.id}>
-                    <span>{row.name}</span>
-                    <strong>{formatCurrency(row.payable)}</strong>
-                  </div>
-                ))}
-                {!financialOverview.karigarRows.length ? (
-                  <p className="muted">No payable balance right now.</p>
-                ) : null}
-              </div>
-            </div>
-
-            <div className="panel inset financial-stats-card">
-              <div className="panel-head">
-                <div>
-                  <h3>Receivable from Shops</h3>
-                  <p className="muted">Outstanding shop billing balance</p>
-                </div>
-                <strong>{formatCurrency(financialOverview.totalReceivable)}</strong>
-              </div>
-              <div className="inline-list compact-list">
-                {financialOverview.shopRows.slice(0, 6).map((row) => (
-                  <div className="inline-list-row" key={row.id}>
-                    <span>{row.name}</span>
-                    <strong>{formatCurrency(row.receivable)}</strong>
-                  </div>
-                ))}
-                {!financialOverview.shopRows.length ? (
-                  <p className="muted">No receivable balance right now.</p>
-                ) : null}
-              </div>
-            </div>
           </div>
 
           {dashboardFilter !== "all" ? (
@@ -1862,7 +1834,7 @@ export function AdminApp({
                   {piece._pendingCount > 1 ? (
                     <p className="muted">Includes {piece._pendingCount} sub-products</p>
                   ) : null}
-                  <p className="muted">Cutting Rate: {formatCurrency(piece.cutting_credit_amount)}</p>
+                  <p className="muted">Cutting Rate: {formatCurrency(getCuttingCreditAmount(piece))}</p>
                   <StatusBadge label="Pending Cutting" tone="cutting" />
                   {piece.reference_slip_url ? (
                     <a className="link" href={piece.reference_slip_url} target="_blank" rel="noreferrer">
@@ -2887,6 +2859,50 @@ export function AdminApp({
         <section className="panel">
           <h2>Payments</h2>
 
+          <div className="financial-stats-grid">
+            <div className="panel inset financial-stats-card">
+              <div className="panel-head">
+                <div>
+                  <h3>Payable to Karigars</h3>
+                  <p className="muted">Approved and pending-sync work liability</p>
+                </div>
+                <strong>{formatCurrency(financialOverview.totalPayable)}</strong>
+              </div>
+              <div className="inline-list compact-list">
+                {financialOverview.karigarRows.slice(0, 6).map((row) => (
+                  <div className="inline-list-row" key={row.id}>
+                    <span>{row.name}</span>
+                    <strong>{formatCurrency(row.payable)}</strong>
+                  </div>
+                ))}
+                {!financialOverview.karigarRows.length ? (
+                  <p className="muted">No payable balance right now.</p>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="panel inset financial-stats-card">
+              <div className="panel-head">
+                <div>
+                  <h3>Receivable from Shops</h3>
+                  <p className="muted">Outstanding shop billing balance</p>
+                </div>
+                <strong>{formatCurrency(financialOverview.totalReceivable)}</strong>
+              </div>
+              <div className="inline-list compact-list">
+                {financialOverview.shopRows.slice(0, 6).map((row) => (
+                  <div className="inline-list-row" key={row.id}>
+                    <span>{row.name}</span>
+                    <strong>{formatCurrency(row.receivable)}</strong>
+                  </div>
+                ))}
+                {!financialOverview.shopRows.length ? (
+                  <p className="muted">No receivable balance right now.</p>
+                ) : null}
+              </div>
+            </div>
+          </div>
+
           <div className="split-grid">
             <form className="panel inset" onSubmit={submitShopPayment}>
               <h3>Record Shop Payment</h3>
@@ -3102,9 +3118,6 @@ export function AdminApp({
               <h2>Payroll History</h2>
               <p className="muted">Paid and payroll-settled work is kept here for audit/search.</p>
             </div>
-            <button type="button" className="button primary" onClick={handleDownloadMasterLedger}>
-              Download Master Ledger
-            </button>
           </div>
 
           <div className="table-wrap">

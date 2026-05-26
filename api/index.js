@@ -301,6 +301,41 @@ async function handleOrders(req, res) {
   sendOk(res, { message: "Order updated", order: updated });
 }
 
+function findProductForOrderItem(products, item) {
+  return (
+    products.find((product) => product.product_id === item.product_id) ||
+    products.find(
+      (product) => normalizeKey(product.product_name) === normalizeKey(item.piece_type)
+    )
+  );
+}
+
+function settingNumber(settings, key) {
+  const setting = settings.find((entry) => normalizeKey(entry.key) === normalizeKey(key));
+  return toNumber(setting?.value);
+}
+
+function resolveCuttingCreditAmount(piece, orderItems, products, settings = []) {
+  const existingAmount = toNumber(piece.cutting_credit_amount);
+  if (existingAmount > 0) return existingAmount;
+
+  const item = orderItems.find((entry) => entry.item_id === piece.item_id) || {};
+  const product =
+    products.find((entry) => entry.product_id === piece.product_id) ||
+    findProductForOrderItem(products, item) ||
+    products.find(
+      (entry) =>
+        normalizeKey(entry.product_name) ===
+        normalizeKey(piece.bundle_piece_type || piece.piece_name)
+    );
+
+  return (
+    toNumber(product?.cutting_rate) ||
+    settingNumber(settings, "cutting_rate_default") ||
+    settingNumber(settings, "cutting_rate")
+  );
+}
+
 async function extractOrder(req, res) {
   requireRole(req, [ROLES.ADMIN]);
   await ensureWorkbook();
@@ -313,9 +348,7 @@ async function extractOrder(req, res) {
   const now = nowISO();
   const pieces = [];
   for (const item of items) {
-    const product =
-      snapshot.products.find(p => p.product_id === item.product_id) ||
-      snapshot.products.find(p => normalizeKey(p.product_name) === normalizeKey(item.piece_type));
+    const product = findProductForOrderItem(snapshot.products, item);
     const subs = product
       ? snapshot.productSubProducts.filter(s => s.product_id === product.product_id)
       : [];
@@ -332,6 +365,8 @@ async function extractOrder(req, res) {
         piece_id: id("piece"),
         item_id: item.item_id,
         order_id: body.order_id,
+        product_id: item.product_id || product?.product_id || "",
+        sub_product_id: sub.sub_id || "",
         piece_name: sub.sub_product_name,
         sub_product_name: sub.sub_product_name,
         item_type: item.item_type,
@@ -340,7 +375,10 @@ async function extractOrder(req, res) {
         assigned_role: normalizeRoleValue(sub.required_skill || "") || inferWorkerRole(sub.sub_product_name),
         measurement_photo_url: item.measurement_photo_url,
         reference_slip_url: order.slip_photo_url,
-        cutting_credit_amount: toNumber(product?.cutting_rate || 0),
+        cutting_credit_amount:
+          toNumber(product?.cutting_rate) ||
+          settingNumber(snapshot.settings, "cutting_rate_default") ||
+          settingNumber(snapshot.settings, "cutting_rate"),
         shop_rate: fallbackShopRate,
         karigar_rate: toNumber(sub.worker_rate),
         is_synced: "FALSE",
@@ -364,8 +402,17 @@ async function markPieceCut(req, res) {
   requireFields(body, ["piece_id"]);
   const {
     [SHEETS.PIECES]: pieces,
-    [SHEETS.KARIGAR]: karigars
-  } = await getManyRecords([SHEETS.PIECES, SHEETS.KARIGAR]);
+    [SHEETS.KARIGAR]: karigars,
+    [SHEETS.ORDER_ITEMS]: orderItems,
+    [SHEETS.PRODUCTS]: products,
+    [SHEETS.SETTINGS]: settings
+  } = await getManyRecords([
+    SHEETS.PIECES,
+    SHEETS.KARIGAR,
+    SHEETS.ORDER_ITEMS,
+    SHEETS.PRODUCTS,
+    SHEETS.SETTINGS
+  ]);
 
   let cuttingBy = user.username;
   if (user.role === ROLES.KARIGAR) {
@@ -406,13 +453,20 @@ async function markPieceCut(req, res) {
       SHEETS.PIECES,
       related.map((piece) => ({
         rowNumber: piece.__rowNumber,
-        record: { ...piece, ...updates }
+        record: {
+          ...piece,
+          ...updates,
+          cutting_credit_amount: resolveCuttingCreditAmount(piece, orderItems, products, settings)
+        }
       }))
     );
     return sendOk(res, { message: `${related.length} related pieces marked cut` });
   }
 
-  await updateByField(SHEETS.PIECES, "piece_id", body.piece_id, updates);
+  await updateByField(SHEETS.PIECES, "piece_id", body.piece_id, {
+    ...updates,
+    cutting_credit_amount: resolveCuttingCreditAmount(target, orderItems, products, settings)
+  });
   sendOk(res, { message: "Piece cut" });
 }
 

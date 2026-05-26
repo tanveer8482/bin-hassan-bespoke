@@ -11,6 +11,7 @@ import {
 } from "./lib/appPersistence";
 import { emptySnapshot } from "./lib/emptySnapshot";
 import { formatDateTime } from "./lib/format";
+import { generateMasterLedgerPdf } from "./lib/pdfReport";
 import { SyncBar } from "./components/SyncBar";
 import { AdminApp, TAB_LIST as ADMIN_TAB_LIST } from "./features/admin/AdminApp";
 import { KarigarApp } from "./features/karigar/KarigarApp";
@@ -706,6 +707,15 @@ export default function App() {
     }
   };
 
+  const handleDownloadMasterLedger = () => {
+    generateMasterLedgerPdf({
+      karigars: data.karigars,
+      shops: data.shops,
+      karigarFinancials: data.computed?.karigarFinancials || {},
+      shopFinancials: data.computed?.shopFinancials || {}
+    });
+  };
+
   if (!token) {
     return <LoginScreen onLogin={handleLogin} loading={loading} error={error} />;
   }
@@ -791,6 +801,16 @@ export default function App() {
                 }}
               >
                 Sync Completed Pieces to Payroll
+              </button>
+              <button
+                className="button ghost"
+                type="button"
+                onClick={() => {
+                  handleDownloadMasterLedger();
+                  setMobileNavOpen(false);
+                }}
+              >
+                Download Master Ledger
               </button>
             </div>
 
